@@ -268,6 +268,7 @@ export default function App() {
   const [specChatMessages, setSpecChatMessages] = useState<Record<string, SpecChatMessage[]>>({});
   const [specChatInput, setSpecChatInput] = useState('');
   const [activeConceptThread, setActiveConceptThread] = useState<string | null>(null);
+  const [graphFullscreen, setGraphFullscreen] = useState(false);
 
   // Refs for SDK session and audio
   const sessionRef = useRef<RealtimeSession | null>(null);
@@ -329,6 +330,17 @@ export default function App() {
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Escape key to close fullscreen graph
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && graphFullscreen) {
+        setGraphFullscreen(false);
+      }
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [graphFullscreen]);
 
   // Periodically fetch background jobs
   useEffect(() => {
@@ -1411,6 +1423,13 @@ export default function App() {
                 <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
                   📊 Concept Graph
                 </span>
+                <button
+                  onClick={() => setGraphFullscreen(true)}
+                  className="text-[9px] text-gray-500 hover:text-gray-300 transition-colors px-2 py-0.5 rounded border border-gray-800 hover:border-gray-600"
+                  title="Fullscreen"
+                >
+                  ⛶ Expand
+                </button>
               </div>
 
               {/* Graph Canvas */}
@@ -2008,6 +2027,36 @@ export default function App() {
               </div>
             </section>
           </main>
+
+          {/* ═══ FULLSCREEN GRAPH OVERLAY ═══════════════════════════════════════ */}
+          {graphFullscreen && (
+            <div className="fixed inset-0 z-50 bg-gray-950 flex flex-col">
+              <div className="px-6 py-3 border-b border-gray-800 bg-gray-900/80 flex items-center justify-between shrink-0">
+                <span className="text-sm font-bold text-gray-300 flex items-center gap-2">
+                  📊 Concept Graph
+                  <span className="text-[10px] text-gray-500 font-normal">Scroll to zoom · Drag to pan · Double-click to fit</span>
+                </span>
+                <button
+                  onClick={() => setGraphFullscreen(false)}
+                  className="text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition-colors border border-gray-700"
+                >
+                  ✕ Close
+                </button>
+              </div>
+              <div className="flex-1 bg-gray-950">
+                <ConceptGraph
+                  graph={conceptGraph}
+                  activeNode={activeConceptThread}
+                  onNodeClick={(nodeId) => {
+                    setActiveConceptThread(nodeId);
+                    setActiveSpec(null);
+                    setGraphFullscreen(false);
+                  }}
+                  isFullscreen={true}
+                />
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
