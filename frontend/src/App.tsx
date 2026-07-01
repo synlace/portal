@@ -425,16 +425,19 @@ export default function App() {
 
       let modelAudioActive = false;
 
-      // SDK handles function calls internally — we just listen for item_update events
-      session.on('item_update', (item: any) => {
-        logger(`item_update: ${item.type} status=${item.status} name=${item.name}`);
+      // Listen directly on transport for function_call events
+      session.transport.on('function_call', (event: any) => {
+        logger(`transport function_call: ${event.name} callId=${event.callId}`);
+        const args = JSON.parse(event.arguments || '{}');
+        handleToolUpdate({ name: event.name, args, status: 'executing' });
+      });
+
+      // Also listen for item_update on transport directly
+      session.transport.on('item_update', (item: any) => {
+        logger(`transport item_update: ${item.type} status=${item.status} name=${item.name}`);
         if (item.type === 'function_call') {
           const args = JSON.parse(item.arguments || '{}');
-          if (item.status === 'in_progress') {
-            logger(`SDK tool start: ${item.name}`);
-            handleToolUpdate({ name: item.name, args, status: 'executing' });
-          } else if (item.status === 'completed') {
-            logger(`SDK tool completed: ${item.name}`);
+          if (item.status === 'completed') {
             handleToolUpdate({ name: item.name, args, status: 'completed', result: item.output });
           }
         }
