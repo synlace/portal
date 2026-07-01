@@ -57,33 +57,6 @@ const TOOLS = toolsSchema.map(toolDef =>
   })
 );
 
-// ─── Format tool args for human-readable display ────────────────────────────
-const formatToolArgs = (toolName: string, args: any): string => {
-  if (!args) return '';
-  
-  switch (toolName) {
-    case 'execute_command':
-      return args.command || '';
-    case 'read_file':
-    case 'write_file':
-    case 'edit_file':
-    case 'list_directory':
-    case 'create_directory':
-    case 'delete_file':
-      return args.path || '';
-    case 'move_file':
-      return args.source && args.destination ? `${args.source} → ${args.destination}` : '';
-    case 'spawn_agent':
-      return args.description || '';
-    case 'get_agent_status':
-      return args.job_id || '';
-    case 'list_agents':
-      return '';
-    default:
-      return JSON.stringify(args);
-  }
-};
-
 // ─── Group consecutive model messages into single turns ─────────────────────
 interface GroupedMessage {
   type: 'system' | 'user' | 'tool' | 'model';
@@ -660,6 +633,113 @@ export default function App() {
     return '🔧';
   };
 
+  const formatToolArgs = (name: string, args: any): string => {
+    if (!args) return '';
+    switch (name) {
+      case 'list_directory': return args.path || '.';
+      case 'read_file': return args.path || '';
+      case 'write_file': return args.path || '';
+      case 'edit_file': return args.path || '';
+      case 'execute_command': return args.command || '';
+      case 'create_directory': return args.path || '';
+      case 'delete_file': return args.path || '';
+      case 'move_file': return args.source && args.destination ? `${args.source} → ${args.destination}` : '';
+      default: return JSON.stringify(args);
+    }
+  };
+
+  const renderAgentLog = (log: any, idx: number) => {
+    if (typeof log === 'string') {
+      return <div key={idx} className="text-gray-400">{log}</div>;
+    }
+
+    switch (log.type) {
+      case 'start':
+        return (
+          <div key={idx} className="text-violet-400 flex items-center gap-2">
+            <span className="text-violet-500">▶</span>
+            <span>Background agent started ({log.model})</span>
+          </div>
+        );
+      case 'tool': {
+        const args = formatToolArgs(log.name, log.args);
+        const result = log.result;
+        let output = null;
+
+        if (log.name === 'execute_command' && result) {
+          const cmdResult = typeof result === 'string' ? JSON.parse(result) : result;
+          output = (
+            <div className="ml-6 mt-1 space-y-0.5">
+              <div className="text-gray-500">$ {log.args?.command}</div>
+              {cmdResult.stdout && <div className="text-green-400/80 whitespace-pre-wrap">{cmdResult.stdout.trim()}</div>}
+              {cmdResult.stderr && <div className="text-red-400/80 whitespace-pre-wrap">{cmdResult.stderr.trim()}</div>}
+              {cmdResult.exit_code !== 0 && <div className="text-amber-400/80">exit {cmdResult.exit_code}</div>}
+              {cmdResult.exit_code === 0 && !cmdResult.stdout && !cmdResult.stderr && <div className="text-gray-600">✓</div>}
+            </div>
+          );
+        } else if (log.name === 'list_directory' && result?.files) {
+          output = (
+            <div className="ml-6 mt-1 text-gray-400">
+              {result.files.map((f: any, i: number) => (
+                <div key={i}>{f.type === 'directory' ? `${f.name}/` : f.name}{f.size ? ` (${f.size}B)` : ''}</div>
+              ))}
+            </div>
+          );
+        } else if (log.name === 'read_file' && result?.content) {
+          const preview = result.content.length > 100 ? result.content.slice(0, 100) + '...' : result.content;
+          output = (
+            <div className="ml-6 mt-1 text-gray-400 whitespace-pre-wrap">{preview}</div>
+          );
+        } else if (log.name === 'write_file' && result?.message) {
+          output = <div className="ml-6 mt-1 text-green-400/80">✓ {result.message}</div>;
+        } else if (result) {
+          const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
+          const preview = resultStr.length > 80 ? resultStr.slice(0, 80) + '...' : resultStr;
+          output = <div className="ml-6 mt-1 text-gray-500">{preview}</div>;
+        }
+
+        return (
+          <div key={idx}>
+            <div className="flex items-center gap-2 text-gray-300">
+              <span className="text-indigo-400">▸</span>
+              <span className="text-indigo-300">{log.name}</span>
+              {args && <span className="text-gray-500">{args}</span>}
+            </div>
+            {output}
+          </div>
+        );
+      }
+      case 'thought': {
+        const text = log.text.replace(/JOB_COMPLETED:.*$/, '').trim();
+        if (!text) return null;
+        const preview = text.length > 120 ? text.slice(0, 120) + '...' : text;
+        return (
+          <div key={idx} className="text-gray-400 italic">
+            {preview}
+          </div>
+        );
+      }
+      case 'error':
+        return (
+          <div key={idx} className="text-red-400 flex items-center gap-2">
+            <span>✕</span>
+            <span>{log.text}</span>
+          </div>
+        );
+      case 'warning':
+        return (
+          <div key={idx} className="text-amber-400 flex items-center gap-2">
+            <span>⚠</span>
+            <span>{log.text}</span>
+          </div>
+        );
+      case 'done':
+        return null;
+      default:
+        return <div key={idx} className="text-gray-400">{JSON.stringify(log)}</div>;
+    }
+  };
+
   return (
     <div className="flex flex-col h-screen bg-gray-950 font-mono">
       {/* Header bar */}
@@ -990,12 +1070,8 @@ export default function App() {
                           {isSelected && (
                             <div className="mt-4 pt-3 border-t border-gray-800/80 space-y-3">
                               <div className="text-[10px] font-bold text-gray-500 uppercase">Agent Logs:</div>
-                              <div className="bg-gray-950 border border-gray-800/80 p-3 rounded text-[11px] leading-relaxed max-h-60 overflow-y-auto space-y-2 text-gray-300 font-sans whitespace-pre-wrap">
-                                {j.logs.map((log, lIdx) => (
-                                  <div key={lIdx} className="border-b border-gray-900/60 pb-1.5 last:border-0">
-                                    {log}
-                                  </div>
-                                ))}
+                              <div className="bg-gray-950 border border-gray-800/80 p-3 rounded text-[11px] leading-relaxed max-h-60 overflow-y-auto space-y-2 text-gray-300 font-sans">
+                                {j.logs.map((log, lIdx) => renderAgentLog(log, lIdx))}
                               </div>
                               
                               {j.result && (
@@ -1046,12 +1122,8 @@ export default function App() {
                           {isSelected && (
                             <div className="mt-4 pt-3 border-t border-gray-800/80 space-y-3">
                               <div className="text-[10px] font-bold text-gray-500 uppercase">Agent Logs:</div>
-                              <div className="bg-gray-950 border border-gray-800/80 p-3 rounded text-[11px] leading-relaxed max-h-60 overflow-y-auto space-y-2 text-gray-300 font-sans whitespace-pre-wrap">
-                                {j.logs.map((log, lIdx) => (
-                                  <div key={lIdx} className="border-b border-gray-900/60 pb-1.5 last:border-0">
-                                    {log}
-                                  </div>
-                                ))}
+                              <div className="bg-gray-950 border border-gray-800/80 p-3 rounded text-[11px] leading-relaxed max-h-60 overflow-y-auto space-y-2 text-gray-300 font-sans">
+                                {j.logs.map((log, lIdx) => renderAgentLog(log, lIdx))}
                               </div>
                               
                               {j.result && (
@@ -1102,12 +1174,8 @@ export default function App() {
                           {isSelected && j.logs.length > 0 && (
                             <div className="mt-4 pt-3 border-t border-gray-800/80 space-y-3">
                               <div className="text-[10px] font-bold text-gray-500 uppercase">Agent Logs:</div>
-                              <div className="bg-gray-950 border border-gray-800/80 p-3 rounded text-[11px] leading-relaxed max-h-60 overflow-y-auto space-y-2 text-gray-300 font-sans whitespace-pre-wrap">
-                                {j.logs.map((log, lIdx) => (
-                                  <div key={lIdx} className="border-b border-gray-900/60 pb-1.5 last:border-0">
-                                    {log}
-                                  </div>
-                                ))}
+                              <div className="bg-gray-950 border border-gray-800/80 p-3 rounded text-[11px] leading-relaxed max-h-60 overflow-y-auto space-y-2 text-gray-300 font-sans">
+                                {j.logs.map((log, lIdx) => renderAgentLog(log, lIdx))}
                               </div>
                             </div>
                           )}

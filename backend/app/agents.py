@@ -163,12 +163,12 @@ async def run_agent_loop(job_id: str, description: str):
     
     if not agent_api_key or agent_api_key in ("your_api_key", "your_api_key_here"):
         JOBS[job_id]["status"] = "failed"
-        JOBS[job_id]["logs"].append("Error: No API key configured. Set AGENT_API_KEY or OPENAI_API_KEY.")
+        JOBS[job_id]["logs"].append({"type": "error", "text": "No API key configured. Set AGENT_API_KEY or OPENAI_API_KEY."})
         return
 
     JOBS[job_id]["status"] = "running"
     JOBS[job_id]["updated_at"] = datetime.utcnow().isoformat()
-    JOBS[job_id]["logs"].append(f"Background agent started (model={agent_model}).")
+    JOBS[job_id]["logs"].append({"type": "start", "model": agent_model})
 
     headers = {
         "Authorization": f"Bearer {agent_api_key}",
@@ -198,15 +198,15 @@ async def run_agent_loop(job_id: str, description: str):
             try:
                 response = await client.post(agent_base_url, json=payload, headers=headers, timeout=45.0)
                 if response.status_code != 200:
-                    error_msg = f"OpenAI API returned error code {response.status_code}: {response.text}"
-                    JOBS[job_id]["logs"].append(f"Error: {error_msg}")
+                    error_msg = f"API returned error code {response.status_code}: {response.text}"
+                    JOBS[job_id]["logs"].append({"type": "error", "text": error_msg})
                     JOBS[job_id]["status"] = "failed"
                     return
                 
                 resp_json = response.json()
                 choices = resp_json.get("choices", [])
                 if not choices:
-                    JOBS[job_id]["logs"].append("Warning: Model returned an empty response. Stopping loop.")
+                    JOBS[job_id]["logs"].append({"type": "warning", "text": "Model returned an empty response."})
                     break
                     
                 message = choices[0].get("message", {})
@@ -218,12 +218,12 @@ async def run_agent_loop(job_id: str, description: str):
 
                 if content:
                     clean_text = content.strip()
-                    JOBS[job_id]["logs"].append(f"Agent thought:\n{clean_text}")
+                    JOBS[job_id]["logs"].append({"type": "thought", "text": clean_text})
                     
                     if "JOB_COMPLETED" in clean_text:
                         JOBS[job_id]["status"] = "completed"
                         JOBS[job_id]["result"] = clean_text
-                        JOBS[job_id]["logs"].append("Job completed successfully!")
+                        JOBS[job_id]["logs"].append({"type": "done"})
                         return
 
                 if tool_calls:
@@ -237,11 +237,14 @@ async def run_agent_loop(job_id: str, description: str):
                         except Exception:
                             args = {}
                         
-                        JOBS[job_id]["logs"].append(f"Executing tool: {name}({args})")
-                        
                         result = await execute_tool(name, args)
                         
-                        JOBS[job_id]["logs"].append(f"Tool result: {str(result)[:200]}...")
+                        JOBS[job_id]["logs"].append({
+                            "type": "tool",
+                            "name": name,
+                            "args": args,
+                            "result": result
+                        })
                         
                         messages.append({
                             "role": "tool",
@@ -255,15 +258,14 @@ async def run_agent_loop(job_id: str, description: str):
                             "role": "user",
                             "content": "Please continue with the next action or output 'JOB_COMPLETED: [summary]' if you are finished."
                         })
-                        JOBS[job_id]["logs"].append("Prompting agent to continue...")
                     
             except Exception as e:
                 logger.error(f"Error in job {job_id} step {step}: {e}", exc_info=True)
-                JOBS[job_id]["logs"].append(f"Exception during execution: {str(e)}")
+                JOBS[job_id]["logs"].append({"type": "error", "text": str(e)})
                 JOBS[job_id]["status"] = "failed"
                 return
                 
         if JOBS[job_id]["status"] == "running":
             JOBS[job_id]["status"] = "completed"
             JOBS[job_id]["result"] = "Agent reached maximum execution steps without explicit JOB_COMPLETED marker."
-            JOBS[job_id]["logs"].append("Agent loop finished (reached max steps limit).")
+            JOBS[job_id]["logs"].append({"type": "warning", "text": "Reached max steps limit."})
