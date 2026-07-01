@@ -320,8 +320,8 @@ async def chat_stream(request: ChatRequest):
     async def event_generator():
         max_iterations = 10  # Prevent infinite tool call loops
         
-        # Build API kwargs
-        api_kwargs = {
+        # Build request body
+        request_body = {
             "model": model,
             "messages": messages,
             "tools": OPENAI_TOOLS,
@@ -330,48 +330,106 @@ async def chat_stream(request: ChatRequest):
         
         # Add reasoning effort for models that support it
         if request.reasoning_effort:
-            api_kwargs["reasoning"] = {"effort": request.reasoning_effort}
+            request_body["reasoning"] = {"effort": request.reasoning_effort}
         
         for _ in range(max_iterations):
             try:
-                stream = client.chat.completions.create(**api_kwargs)
-                
-                tool_calls = []
-                current_tool_call = None
-                text_content = []
-                
-                for chunk in stream:
-                    delta = chunk.choices[0].delta if chunk.choices else None
-                    if not delta:
-                        continue
-                    
-                    # Text content
-                    if delta.content:
-                        text_content.append(delta.content)
-                        yield f"data: {json.dumps({'type': 'text_delta', 'content': delta.content})}\n\n"
-                    
-                    # Tool calls
-                    if delta.tool_calls:
-                        for tc_delta in delta.tool_calls:
-                            if tc_delta.index is not None:
-                                # New tool call or continuation
-                                if current_tool_call is None or tc_delta.index != current_tool_call.get("index"):
-                                    if current_tool_call:
-                                        tool_calls.append(current_tool_call)
-                                    current_tool_call = {
-                                        "index": tc_delta.index,
-                                        "id": tc_delta.id or "",
-                                        "name": "",
-                                        "arguments": ""
-                                    }
+                # Use httpx for OpenRouter to support extra parameters like reasoning
+                if base_url:
+                    async with httpx.AsyncClient() as http_client:
+                        response = await http_client.post(
+                            f"{base_url}/chat/completions",
+                            headers={"Authorization": f"Bearer {api_key}"},
+                            json=request_body,
+                            timeout=60.0
+                        )
+                        response.raise_for_status()
+                        
+                        # Parse SSE stream manually
+                        tool_calls = []
+                        current_tool_call = None
+                        text_content = []
+                        
+                        for line in response.text.split("\n"):
+                            if not line.startswith("data: "):
+                                continue
+                            data = line[6:]
+                            if data == "[DONE]":
+                                break
+                            
+                            try:
+                                chunk = json.loads(data)
+                                delta = chunk.get("choices", [{}])[0].get("delta", {})
                                 
-                                if tc_delta.id:
-                                    current_tool_call["id"] = tc_delta.id
-                                if tc_delta.function:
-                                    if tc_delta.function.name:
-                                        current_tool_call["name"] = tc_delta.function.name
-                                    if tc_delta.function.arguments:
-                                        current_tool_call["arguments"] += tc_delta.function.arguments
+                                # Text content
+                                if delta.get("content"):
+                                    content = delta["content"]
+                                    text_content.append(content)
+                                    yield f"data: {json.dumps({'type': 'text_delta', 'content': content})}\n\n"
+                                
+                                # Tool calls
+                                if delta.get("tool_calls"):
+                                    for tc_delta in delta["tool_calls"]:
+                                        if tc_delta.get("index") is not None:
+                                            if current_tool_call is None or tc_delta["index"] != current_tool_call.get("index"):
+                                                if current_tool_call:
+                                                    tool_calls.append(current_tool_call)
+                                                current_tool_call = {
+                                                    "index": tc_delta["index"],
+                                                    "id": tc_delta.get("id", ""),
+                                                    "name": "",
+                                                    "arguments": ""
+                                                }
+                                            
+                                            if tc_delta.get("id"):
+                                                current_tool_call["id"] = tc_delta["id"]
+                                            if tc_delta.get("function"):
+                                                if tc_delta["function"].get("name"):
+                                                    current_tool_call["name"] = tc_delta["function"]["name"]
+                                                if tc_delta["function"].get("arguments"):
+                                                    current_tool_call["arguments"] += tc_delta["function"]["arguments"]
+                            except json.JSONDecodeError:
+                                continue
+                else:
+                    # Use OpenAI SDK for direct OpenAI calls
+                    stream = client.chat.completions.create(**request_body)
+                    
+                    tool_calls = []
+                    current_tool_call = None
+                    text_content = []
+                    
+                    for chunk in stream:
+                        delta = chunk.choices[0].delta if chunk.choices else None
+                        if not delta:
+                            continue
+                        
+                        # Text content
+                        if delta.content:
+                            text_content.append(delta.content)
+                            yield f"data: {json.dumps({'type': 'text_delta', 'content': delta.content})}\n\n"
+                        
+                        # Tool calls
+                        if delta.tool_calls:
+                            for tc_delta in delta.tool_calls:
+                                if tc_delta.index is not None:
+                                    # New tool call or continuation
+                                    if current_tool_call is None or tc_delta.index != current_tool_call.get("index"):
+                                        if current_tool_call:
+                                            tool_calls.append(current_tool_call)
+                                        current_tool_call = {
+                                            "index": tc_delta.index,
+                                            "id": tc_delta.id or "",
+                                            "name": "",
+                                            "arguments": ""
+                                        }
+                                    
+                                    if tc_delta.id:
+                                        current_tool_call["id"] = tc_delta.id
+                                    if tc_delta.function:
+                                        if tc_delta.function.name:
+                                            current_tool_call["name"] = tc_delta.function.name
+                                        if tc_delta.function.arguments:
+                                            current_tool_call["arguments"] += tc_delta.function.arguments
                 
                 # Add last tool call
                 if current_tool_call:
