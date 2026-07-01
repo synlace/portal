@@ -3,7 +3,6 @@ import {
   ReactFlow,
   Background,
   Controls,
-  MiniMap,
   useNodesState,
   useEdgesState,
   useReactFlow,
@@ -205,13 +204,6 @@ const nodeTypes: NodeTypes = {
   crossCuttingNode: CrossCuttingNode,
 };
 
-// ─── MiniMap node color helper ──────────────────────────────────────────────
-function minimapNodeColor(node: Node) {
-  if (node.type === 'infraNode') return '#92400e';
-  if (node.type === 'crossCuttingNode') return '#6d28d9';
-  return '#374151';
-}
-
 // ─── Inner Component (needs ReactFlowProvider context) ──────────────────────
 function ConceptGraphInner({ graph, activeNode, onNodeClick, isFullscreen }: ConceptGraphProps) {
   const { fitView } = useReactFlow();
@@ -219,7 +211,8 @@ function ConceptGraphInner({ graph, activeNode, onNodeClick, isFullscreen }: Con
   const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(() => {
     if (!graph || graph.concepts.length === 0) return { nodes: [], edges: [] };
     return getLayoutedElements(graph.concepts, graph.relationships);
-  }, [graph]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [graph?.concepts, graph?.relationships]);
 
   const enrichedNodes = useMemo(() => {
     return layoutedNodes.map(n => ({
@@ -285,13 +278,6 @@ function ConceptGraphInner({ graph, activeNode, onNodeClick, isFullscreen }: Con
       >
         <Background color="#1f2937" gap={20} size={1} />
         <Controls showInteractive={false} />
-        <MiniMap
-          nodeColor={minimapNodeColor}
-          maskColor="rgba(3, 7, 18, 0.8)"
-          style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 8, width: 120, height: 80 }}
-          pannable={false}
-          zoomable={false}
-        />
       </ReactFlow>
     </div>
   );
