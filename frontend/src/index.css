@@ -41,3 +41,39 @@ body {
 .wave-bar:nth-child(3) { animation-delay: 0.3s; }
 .wave-bar:nth-child(4) { animation-delay: 0.45s; }
 .wave-bar:nth-child(5) { animation-delay: 0.6s; }
+
+/* React Flow dark theme overrides */
+.react-flow__background {
+  background-color: #030712 !important;
+}
+.react-flow__minimap {
+  background-color: #111827 !important;
+  border: 1px solid #1f2937 !important;
+  border-radius: 8px !important;
+}
+.react-flow__controls {
+  border: 1px solid #1f2937 !important;
+  border-radius: 8px !important;
+  overflow: hidden;
+}
+.react-flow__controls button {
+  background-color: #111827 !important;
+  border-bottom-color: #1f2937 !important;
+  color: #9ca3af !important;
+  fill: #9ca3af !important;
+}
+.react-flow__controls button:hover {
+  background-color: #1f2937 !important;
+}
+.react-flow__controls button svg {
+  fill: #9ca3af !important;
+}
+.react-flow__edge-path {
+  stroke: #4b5563 !important;
+}
+.react-flow__handle {
+  width: 6px !important;
+  height: 6px !important;
+  background-color: #6b7280 !important;
+  border: 1px solid #374151 !important;
+}

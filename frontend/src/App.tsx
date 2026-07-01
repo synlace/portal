@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { RealtimeAgent, RealtimeSession, OpenAIRealtimeWebRTC, tool } from '@openai/agents/realtime';
 import toolsSchema from '../../tools.json';
+import ConceptGraph from './components/ConceptGraph';
 
 // ─── Types for concept graph and specs ───────────────────────────────────────
 interface ConceptNode {
@@ -1413,68 +1414,15 @@ export default function App() {
               </div>
 
               {/* Graph Canvas */}
-              <div className="relative bg-gray-950/40 overflow-hidden flex items-center justify-center" style={{ minHeight: 200 }}>
-                {conceptGraph && conceptGraph.concepts.length > 0 ? (
-                  <>
-                    <svg className="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg">
-                      <defs>
-                        <marker id="arrow" viewBox="0 0 10 10" refX="16" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#4b5563" />
-                        </marker>
-                      </defs>
-                      {conceptGraph.relationships.map((rel, i) => {
-                        const from = conceptGraph.concepts.find(c => c.id === rel.from);
-                        const to = conceptGraph.concepts.find(c => c.id === rel.to);
-                        if (!from || !to) return null;
-                        return <line key={i} x1={from.x + 60} y1={from.y + 20} x2={to.x + 60} y2={to.y} stroke="#4b5563" strokeWidth="1.5" markerEnd="url(#arrow)" />;
-                      })}
-                      {conceptGraph.concepts.filter(c => c.parent).map((child, i) => {
-                        const parent = conceptGraph.concepts.find(c => c.id === child.parent);
-                        if (!parent) return null;
-                        return <line key={`p-${i}`} x1={parent.x + 60} y1={parent.y + 25} x2={child.x + 60} y2={child.y} stroke="#374151" strokeWidth="1" strokeDasharray="3,3" markerEnd="url(#arrow)" />;
-                      })}
-                    </svg>
-                    <div className="absolute inset-0 select-none">
-                      {conceptGraph.concepts.map((node) => {
-                        const isRoot = !node.parent;
-                        const isActive = activeConceptThread === node.id;
-                        return (
-                          <div
-                            key={node.id}
-                            onClick={() => {
-                              setActiveConceptThread(node.id);
-                              setActiveSpec(null);
-                            }}
-                            className={`absolute cursor-pointer transition-all ${
-                              isActive ? 'z-10' : 'hover:z-10'
-                            }`}
-                            style={{ left: node.x, top: node.y, width: 120 }}
-                          >
-                            <div className={`p-1.5 rounded-lg text-center transition-all text-[10px] font-bold ${
-                              isRoot
-                                ? 'bg-violet-950/80 border-2 border-violet-500 text-violet-200 shadow-lg'
-                                : isActive
-                                  ? 'bg-gray-800 border border-violet-500 text-violet-300 shadow-md'
-                                  : 'bg-gray-900 border border-gray-700 text-gray-300 hover:border-gray-500'
-                            }`}>
-                              {node.label}
-                              {conceptGraph.specs[node.id] && (
-                                <div className="text-[7px] text-gray-500 mt-0.5 font-normal">
-                                  📄 {conceptGraph.specs[node.id].length} spec{conceptGraph.specs[node.id].length > 1 ? 's' : ''}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </>
-                ) : (
-                  <div className="text-center p-6 text-gray-600 text-[11px]">
-                    <div className="text-2xl mb-2 opacity-30">📊</div>
-                    No concept graph yet.
-                  </div>
-                )}
+              <div className="relative bg-gray-950/40 overflow-hidden" style={{ minHeight: 280 }}>
+                <ConceptGraph
+                  graph={conceptGraph}
+                  activeNode={activeConceptThread}
+                  onNodeClick={(nodeId) => {
+                    setActiveConceptThread(nodeId);
+                    setActiveSpec(null);
+                  }}
+                />
               </div>
 
               {/* Specs Divider */}
