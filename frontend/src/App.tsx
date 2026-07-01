@@ -798,6 +798,15 @@ export default function App() {
                 const isDelegated = m.toolName === 'spawn_agent';
                 const toolIcon = getToolIcon(m.toolName || '');
                 const humanReadableArgs = formatToolArgs(m.toolName || '', m.toolArgs);
+                
+                // Parse execute_command results for nice display
+                let cmdOutput = null;
+                if (m.toolName === 'execute_command' && m.toolResult) {
+                  try {
+                    cmdOutput = JSON.parse(m.toolResult);
+                  } catch {}
+                }
+                
                 return (
                   <div key={idx} className={`bg-gray-900 border border-gray-800/80 rounded p-4 text-xs font-mono space-y-2.5 max-w-3xl shadow-md ${
                     isDelegated ? 'border-l-4 border-l-violet-500' : 'border-l-4 border-l-indigo-500'
@@ -820,11 +829,36 @@ export default function App() {
                       </div>
                     )}
 
-                    {m.toolResult && (
+                    {cmdOutput ? (
+                      <div className="bg-gray-950 rounded border border-gray-800/50 overflow-hidden">
+                        {/* Command prompt */}
+                        <div className="bg-gray-900 px-3 py-1.5 text-gray-400 text-[10px] border-b border-gray-800/50">
+                          $ {m.toolArgs?.command}
+                        </div>
+                        {/* stdout */}
+                        {cmdOutput.stdout && (
+                          <div className="px-3 py-2 text-green-400/90 whitespace-pre-wrap max-h-36 overflow-y-auto">
+                            {cmdOutput.stdout}
+                          </div>
+                        )}
+                        {/* stderr */}
+                        {cmdOutput.stderr && (
+                          <div className="px-3 py-2 text-red-400/90 whitespace-pre-wrap max-h-36 overflow-y-auto border-t border-gray-800/50">
+                            {cmdOutput.stderr}
+                          </div>
+                        )}
+                        {/* exit code */}
+                        {cmdOutput.exit_code !== 0 && (
+                          <div className="px-3 py-1.5 text-amber-400/90 border-t border-gray-800/50">
+                            exit code: {cmdOutput.exit_code}
+                          </div>
+                        )}
+                      </div>
+                    ) : m.toolResult ? (
                       <div className="bg-gray-950 p-2.5 rounded border border-gray-800/50 max-h-36 overflow-y-auto text-green-400/90 whitespace-pre-wrap">
                         {m.toolResult}
                       </div>
-                    )}
+                    ) : null}
                   </div>
                 );
               }
