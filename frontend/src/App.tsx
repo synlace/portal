@@ -1031,9 +1031,8 @@ export default function App() {
   const sendTextMessage = async () => {
     if (!textInput.trim()) return;
     
-    // Streaming mode
+    // Streaming mode - text chat works without connection
     if (connectionMode === 'streaming') {
-      if (!isConnected) return;
       await sendStreamingMessage(textInput);
       return;
     }
@@ -1487,8 +1486,8 @@ export default function App() {
             <div className="flex gap-3 items-center mb-2">
               <input 
                 type="text" 
-                placeholder={isConnected ? "Type a message and press enter..." : "Connect to start chatting"} 
-                disabled={!isConnected}
+                placeholder={connectionMode === 'streaming' ? "Type a message and press enter..." : (isConnected ? "Type a message and press enter..." : "Connect to start chatting")} 
+                disabled={connectionMode !== 'streaming' && !isConnected}
                 value={textInput}
                 onChange={(e) => setTextInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && sendTextMessage()}
@@ -1496,7 +1495,7 @@ export default function App() {
               />
               <button 
                 onClick={sendTextMessage}
-                disabled={!isConnected}
+                disabled={connectionMode !== 'streaming' && !isConnected}
                 className="bg-violet-600 hover:bg-violet-700 disabled:bg-gray-800/50 p-3 rounded-lg text-white disabled:text-gray-600 transition-colors shadow-md"
               >
                 <Send className="w-4 h-4" />
