@@ -208,6 +208,9 @@ export default function App() {
     const saved = localStorage.getItem('portal_favorite_models');
     return saved ? JSON.parse(saved) : [];
   });
+  
+  // Thinking effort for reasoning models
+  const [thinkingEffort, setThinkingEffort] = useState<'low' | 'medium' | 'high'>('low');
 
   // Refs for SDK session and audio
   const sessionRef = useRef<RealtimeSession | null>(null);
@@ -852,7 +855,8 @@ export default function App() {
         body: JSON.stringify({ 
           messages: apiMessages,
           model: selectedModel,
-          base_url: baseUrl
+          base_url: baseUrl,
+          reasoning_effort: thinkingEffort
         })
       });
       
@@ -1603,6 +1607,20 @@ export default function App() {
                     </div>
                   )}
                 </div>
+              )}
+              
+              {/* Thinking effort selector - shown in streaming and noaudio modes */}
+              {(connectionMode === 'streaming' || connectionMode === 'noaudio') && (
+                <select 
+                  value={thinkingEffort}
+                  onChange={(e) => setThinkingEffort(e.target.value as 'low' | 'medium' | 'high')}
+                  className="text-[10px] px-2 py-1 rounded border bg-gray-800/50 border-gray-700 text-gray-400 cursor-pointer focus:outline-none focus:border-violet-500"
+                  title="Thinking effort for reasoning models"
+                >
+                  <option value="low">🧠 Low</option>
+                  <option value="medium">🧠 Medium</option>
+                  <option value="high">🧠 High</option>
+                </select>
               )}
               
               {/* Status indicator */}

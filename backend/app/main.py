@@ -238,6 +238,7 @@ class ChatRequest(BaseModel):
     messages: list[ChatMessage]
     model: Optional[str] = "gpt-4o-mini"
     base_url: Optional[str] = None
+    reasoning_effort: Optional[str] = None  # "low", "medium", "high"
 
 # OpenAI models (static list)
 OPENAI_MODELS = [
@@ -319,14 +320,21 @@ async def chat_stream(request: ChatRequest):
     async def event_generator():
         max_iterations = 10  # Prevent infinite tool call loops
         
+        # Build API kwargs
+        api_kwargs = {
+            "model": model,
+            "messages": messages,
+            "tools": OPENAI_TOOLS,
+            "stream": True
+        }
+        
+        # Add reasoning effort for models that support it
+        if request.reasoning_effort:
+            api_kwargs["reasoning"] = {"effort": request.reasoning_effort}
+        
         for _ in range(max_iterations):
             try:
-                stream = client.chat.completions.create(
-                    model=model,
-                    messages=messages,
-                    tools=OPENAI_TOOLS,
-                    stream=True
-                )
+                stream = client.chat.completions.create(**api_kwargs)
                 
                 tool_calls = []
                 current_tool_call = None
