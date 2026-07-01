@@ -716,6 +716,7 @@ export default function App() {
         const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
         mediaRecorderRef.current = mediaRecorder;
         audioChunksRef.current = [];
+        const recordingStartTime = Date.now();
         
         mediaRecorder.ondataavailable = (event) => {
           if (event.data.size > 0) {
@@ -724,8 +725,15 @@ export default function App() {
         };
         
         mediaRecorder.onstop = async () => {
+          const recordingDuration = (Date.now() - recordingStartTime) / 1000;
           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
           stream.getTracks().forEach(track => track.stop());
+          
+          // Skip if recording too short or too small (likely noise/accidental)
+          if (recordingDuration < 1.0 || audioBlob.size < 1000) {
+            console.log(`Recording skipped: ${recordingDuration.toFixed(1)}s, ${audioBlob.size} bytes`);
+            return;
+          }
           
           // Send to STT endpoint
           const formData = new FormData();
@@ -735,7 +743,7 @@ export default function App() {
             const response = await fetch('/api/stt', { method: 'POST', body: formData });
             const data = await response.json();
             
-            if (data.text) {
+            if (data.text && data.text.trim().length > 1) {
               // Send transcribed text as message
               await sendStreamingMessage(data.text);
             }
