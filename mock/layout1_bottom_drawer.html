@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal - Concept Map Bottom Drawer Mockup</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .font-mono {
+            font-family: 'Fira Code', monospace;
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(31, 41, 55, 0.3);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(75, 85, 99, 0.5);
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(107, 114, 128, 0.7);
+        }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-200 h-screen flex flex-col overflow-hidden">
+
+    <!-- Header bar -->
+    <header class="border-b border-gray-800 bg-gray-900/60 backdrop-blur px-6 py-4 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="w-4 h-4 rounded-full bg-violet-500 animate-pulse"></div>
+            <h1 class="text-xl font-bold bg-gradient-to-r from-violet-400 to-indigo-400 bg-clip-text text-transparent font-mono">
+                portal
+            </h1>
+            <span class="text-xs text-gray-400 bg-gray-800 px-2.5 py-0.5 rounded-md font-mono">v1.0.0-beta</span>
+        </div>
+        <div class="flex items-center gap-3 font-mono">
+            <span class="text-xs text-violet-400 border border-violet-800/50 bg-violet-950/20 px-3 py-1 rounded-md">
+                Layout 1: Bottom Drawer
+            </span>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <div class="flex-1 flex overflow-hidden relative">
+        
+        <!-- Left: Conversation Area (expanded to fill mostly) -->
+        <main class="flex-1 flex flex-col bg-gray-900/5 overflow-hidden">
+            <div class="px-6 py-3 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between font-mono shrink-0">
+                <span class="text-xs font-bold text-gray-400 uppercase tracking-widest">Conversation</span>
+                <span class="text-xs text-violet-400 font-semibold">3 messages</span>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-6 space-y-6 pb-24">
+                <!-- System Welcome -->
+                <div class="bg-violet-950/15 border border-violet-900/30 text-violet-300 p-4 rounded text-xs leading-relaxed max-w-2xl font-mono">
+                    Welcome to portal. Use the voice button or chat box to speak with your AI assistant. Ask about microservices or system architecture to see the concept map populate.
+                </div>
+
+                <!-- User Query -->
+                <div class="flex flex-col gap-1 max-w-[80%] ml-auto items-end">
+                    <span class="text-[10px] text-gray-500 font-bold px-1 uppercase font-mono">You</span>
+                    <div class="p-4 rounded-lg text-sm leading-relaxed shadow-sm bg-violet-600 text-white rounded-tr-none">
+                        Can you explain the main concepts of a Microservices architecture and how they interact?
+                    </div>
+                </div>
+
+                <!-- AI Response -->
+                <div class="flex flex-col gap-1 max-w-[80%] mr-auto items-start">
+                    <span class="text-[10px] text-gray-500 font-bold px-1 uppercase font-mono">Assistant</span>
+                    <div class="p-4 rounded-lg text-sm leading-relaxed shadow-sm bg-gray-900 border border-gray-800/80 text-gray-200 rounded-tl-none space-y-2.5">
+                        <p>A <strong>Microservices Architecture</strong> structures an application as a collection of loosely coupled services. Here are the core concepts:</p>
+                        <ul class="list-disc pl-5 space-y-1 text-gray-300">
+                            <li><strong>API Gateway:</strong> Single entry point that routes client requests to appropriate services.</li>
+                            <li><strong>Service Communications:</strong> Typically uses synchronous REST/gRPC or asynchronous message brokers.</li>
+                            <li><strong>Containerization:</strong> Packaging services into isolated containers (like Docker) for consistent deployment.</li>
+                        </ul>
+                        <p class="text-xs text-violet-400 mt-2 font-mono">✨ Interactive Concept Map populated below! Click any node to shift focus.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input Bar -->
+            <div class="p-4 border-t border-gray-800 bg-gray-950 shrink-0">
+                <div class="flex gap-2 items-center max-w-4xl mx-auto">
+                    <button class="p-3 rounded-lg border bg-green-950/30 border-green-800/40 text-green-400 flex items-center justify-center">
+                        🎙️
+                    </button>
+                    <input 
+                        type="text" 
+                        placeholder="Type a message and press enter..." 
+                        class="flex-1 bg-gray-900/80 border border-gray-800 focus:border-violet-500 text-white rounded px-4 py-3 focus:outline-none transition-colors text-sm font-sans"
+                        disabled
+                    />
+                    <button class="bg-violet-600 p-3 rounded-lg text-white">
+                        Send
+                    </button>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right: Background Agents Panel -->
+        <section class="w-80 border-l border-gray-800/80 bg-gray-900/10 flex flex-col shrink-0 overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between font-mono shrink-0">
+                <div class="flex items-center gap-2">
+                    <span class="text-sm font-bold text-gray-400 uppercase tracking-widest">Agents</span>
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4 space-y-4">
+                <div class="text-center p-6 text-gray-600 font-mono">
+                    <p class="text-xs">No active background agents.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Bottom Drawer: Concept Map -->
+        <div class="absolute bottom-0 left-0 right-80 bg-gray-900 border-t border-gray-800 shadow-2xl flex flex-col h-80 z-20 transition-all duration-300">
+            <!-- Drawer Header -->
+            <div class="px-6 py-3 border-b border-gray-800 flex items-center justify-between bg-gray-950/80 shrink-0 font-mono">
+                <div class="flex items-center gap-2">
+                    <span class="text-violet-400 text-sm">◆</span>
+                    <span class="text-xs font-bold text-gray-300 uppercase tracking-wider">Topic Concept Graph</span>
+                </div>
+                <div class="flex items-center gap-3 text-xs">
+                    <button class="px-2 py-0.5 rounded border border-gray-700 bg-gray-800 hover:bg-gray-700 text-gray-300 text-[10px]">
+                        Reset Zoom
+                    </button>
+                    <button class="text-gray-500 hover:text-gray-300">
+                        ✕
+                    </button>
+                </div>
+            </div>
+
+            <!-- Drawer Canvas (Concept Map visualization) -->
+            <div class="flex-1 relative overflow-hidden bg-gray-950/50 flex items-center justify-center p-4">
+                <!-- SVG Canvas with nodes and edges -->
+                <svg class="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <marker id="arrow" viewBox="0 0 10 10" refX="18" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#4b5563" />
+                        </marker>
+                    </defs>
+
+                    <!-- Connections (Edges) -->
+                    <line x1="350" y1="50" x2="150" y2="150" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)" />
+                    <line x1="350" y1="50" x2="350" y2="150" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)" />
+                    <line x1="350" y1="50" x2="550" y2="150" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)" />
+                    
+                    <line x1="150" y1="150" x2="150" y2="230" stroke="#4b5563" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrow)" />
+                    <line x1="350" y1="150" x2="350" y2="230" stroke="#4b5563" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrow)" />
+                    <line x1="550" y1="150" x2="550" y2="230" stroke="#4b5563" stroke-width="1.5" stroke-dasharray="3,3" marker-end="url(#arrow)" />
+                </svg>
+
+                <!-- Overlay Nodes (HTML absolutely positioned for interactivity and crisp text) -->
+                <div class="absolute inset-0 pointer-events-none">
+                    <!-- Root Node -->
+                    <div class="absolute pointer-events-auto cursor-pointer group" style="left: calc(50% - 150px); top: 30px; width: 220px;">
+                        <div class="bg-violet-950/80 hover:bg-violet-900/90 border border-violet-600 text-violet-200 px-4 py-2.5 rounded-lg text-center shadow-lg shadow-violet-500/10 transition-all font-mono font-bold text-xs">
+                            Microservices
+                            <div class="text-[9px] text-violet-400 font-normal mt-0.5">Core Architectural Topic</div>
+                        </div>
+                    </div>
+
+                    <!-- Child Node 1 -->
+                    <div class="absolute pointer-events-auto cursor-pointer group" style="left: calc(50% - 350px); top: 130px; width: 180px;" onclick="alert('Switching context to API Gateway...')">
+                        <div class="bg-gray-900 hover:bg-gray-800/90 border border-gray-700 hover:border-violet-500 text-gray-200 hover:text-violet-300 px-3 py-2 rounded-lg text-center shadow transition-all font-mono text-xs">
+                            API Gateway
+                            <div class="text-[9px] text-gray-500 group-hover:text-violet-400/80 font-normal mt-0.5">Routing & Filter</div>
+                        </div>
+                    </div>
+
+                    <!-- Sub-child 1 -->
+                    <div class="absolute pointer-events-auto cursor-pointer group" style="left: calc(50% - 350px); top: 215px; width: 180px;">
+                        <div class="bg-gray-950 border border-gray-800/80 text-gray-400 px-3 py-1.5 rounded text-center font-mono text-[10px]">
+                            Authentication
+                        </div>
+                    </div>
+
+                    <!-- Child Node 2 -->
+                    <div class="absolute pointer-events-auto cursor-pointer group" style="left: calc(50% - 90px); top: 130px; width: 180px;">
+                        <div class="bg-gray-900 hover:bg-gray-800/90 border border-gray-700 hover:border-violet-500 text-gray-200 hover:text-violet-300 px-3 py-2 rounded-lg text-center shadow transition-all font-mono text-xs">
+                            Service Comms
+                            <div class="text-[9px] text-gray-500 font-normal mt-0.5">Sync / Async</div>
+                        </div>
+                    </div>
+
+                    <!-- Sub-child 2 -->
+                    <div class="absolute pointer-events-auto cursor-pointer group" style="left: calc(50% - 90px); top: 215px; width: 180px;">
+                        <div class="bg-gray-950 border border-gray-800/80 text-gray-400 px-3 py-1.5 rounded text-center font-mono text-[10px]">
+                            gRPC / REST
+                        </div>
+                    </div>
+
+                    <!-- Child Node 3 -->
+                    <div class="absolute pointer-events-auto cursor-pointer group" style="left: calc(50% + 170px); top: 130px; width: 180px;">
+                        <div class="bg-gray-900 hover:bg-gray-800/90 border border-gray-700 hover:border-violet-500 text-gray-200 hover:text-violet-300 px-3 py-2 rounded-lg text-center shadow transition-all font-mono text-xs">
+                            Containerization
+                            <div class="text-[9px] text-gray-500 font-normal mt-0.5">Deployment Unit</div>
+                        </div>
+                    </div>
+
+                    <!-- Sub-child 3 -->
+                    <div class="absolute pointer-events-auto cursor-pointer group" style="left: calc(50% + 170px); top: 215px; width: 180px;">
+                        <div class="bg-gray-950 border border-gray-800/80 text-gray-400 px-3 py-1.5 rounded text-center font-mono text-[10px]">
+                            Docker / K8s
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Drawer Controls Footer -->
+            <div class="px-6 py-2 border-t border-gray-800 flex items-center justify-between bg-gray-950 text-[10px] text-gray-500 shrink-0 font-mono">
+                <div class="flex items-center gap-4">
+                    <span>Layout: <strong class="text-gray-300">Tree (Top-down)</strong></span>
+                    <span>Depth: <strong class="text-gray-300">2</strong></span>
+                    <span>Nodes: <strong class="text-violet-400">7 active</strong></span>
+                </div>
+                <div>
+                    <span>💡 Pro-tip: Clicking any sub-node shifts conversational focus</span>
+                </div>
+            </div>
+        </div>
+
+    </div>
+</body>
+</html>
