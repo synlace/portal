@@ -3,23 +3,52 @@ import json
 import asyncio
 import logging
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import httpx
 from dotenv import load_dotenv
+from openai import OpenAI
 
 # Load .env file from workspace root if it exists
 load_dotenv(os.path.join(os.environ.get("WORKSPACE_DIR", "/workspace"), ".env"))
 
-from backend.app.agents import get_all_jobs
+from backend.app.agents import get_all_jobs, cancel_job
 from backend.app.tool_executor import execute_tool
 
 # Load tool definitions from shared config
 TOOLS_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "tools.json")
 with open(TOOLS_PATH) as f:
     TOOLS = json.load(f)
+
+# System instruction for streaming mode
+SYSTEM_INSTRUCTION = (
+    "You are 'portal', a low-latency, real-time AI software developer. "
+    "You have access to the user's workspace via a mounted volume, "
+    "allowing you to view and edit files, run bash commands, and spawn background agents.\n\n"
+    "YOU HAVE FULL ACCESS TO SHELL COMMANDS. When the user asks you to run a command, "
+    "you MUST use the 'execute_command' tool to run it and return the output.\n\n"
+    "RESPONSE FORMAT RULES:\n"
+    "- When the user asks you to do something that requires a tool, give a SHORT 5-10 word acknowledgment "
+    "like 'Running that now.' or 'Let me check.' THEN immediately call the tool.\n"
+    "- After the tool completes, give a SHORT result like 'The output is: ...' or 'Done.'\n"
+    "- Keep responses concise unless the user explicitly asks for detail.\n\n"
+    "Your workspace is mounted at '/workspace'. All paths must be resolved relative to this root."
+)
+
+# Convert tools to OpenAI function calling format
+OPENAI_TOOLS = []
+for tool_def in TOOLS:
+    OPENAI_TOOLS.append({
+        "type": "function",
+        "function": {
+            "name": tool_def["name"],
+            "description": tool_def["description"],
+            "parameters": tool_def["parameters"]
+        }
+    })
 
 # Configure logging
 logging.basicConfig(
@@ -53,6 +82,14 @@ async def list_jobs():
 async def list_jobs_legacy():
     """Legacy endpoint - use /api/jobs instead."""
     return get_all_jobs()
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_job_endpoint(job_id: str):
+    """Cancel a running background job."""
+    success = cancel_job(job_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Job '{job_id}' not found or cannot be cancelled.")
+    return {"status": "cancelled", "job_id": job_id}
 
 class ToolCall(BaseModel):
     name: str
@@ -145,6 +182,155 @@ async def create_session(request: Request):
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(status_code=500, detail=f"SDP proxy failed: {str(e)}")
+
+# ─── Streaming Mode Endpoints ────────────────────────────────────────────────
+
+@app.post("/api/stt")
+async def speech_to_text(audio: UploadFile = File(...)):
+    """Convert audio to text using Whisper API."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="OpenAI API Key not set.")
+    
+    audio_bytes = await audio.read()
+    client = OpenAI(api_key=api_key)
+    
+    try:
+        transcript = client.audio.transcriptions.create(
+            model="whisper-1",
+            file=("audio.webm", audio_bytes, "audio/webm")
+        )
+        return {"text": transcript.text}
+    except Exception as e:
+        logger.error(f"Whisper transcription failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
+
+class ChatMessage(BaseModel):
+    role: str
+    content: str
+    tool_call_id: Optional[str] = None
+    tool_calls: Optional[list] = None
+
+class ChatRequest(BaseModel):
+    messages: list[ChatMessage]
+
+@app.post("/api/chat")
+async def chat_stream(request: ChatRequest):
+    """Stream chat completions with tool execution loop."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="OpenAI API Key not set.")
+    
+    client = OpenAI(api_key=api_key)
+    
+    # Build messages array with system prompt
+    messages = [{"role": "system", "content": SYSTEM_INSTRUCTION}]
+    for msg in request.messages:
+        messages.append({"role": msg.role, "content": msg.content})
+    
+    async def event_generator():
+        max_iterations = 10  # Prevent infinite tool call loops
+        
+        for _ in range(max_iterations):
+            try:
+                stream = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=messages,
+                    tools=OPENAI_TOOLS,
+                    stream=True
+                )
+                
+                tool_calls = []
+                current_tool_call = None
+                text_content = []
+                
+                for chunk in stream:
+                    delta = chunk.choices[0].delta if chunk.choices else None
+                    if not delta:
+                        continue
+                    
+                    # Text content
+                    if delta.content:
+                        text_content.append(delta.content)
+                        yield f"data: {json.dumps({'type': 'text_delta', 'content': delta.content})}\n\n"
+                    
+                    # Tool calls
+                    if delta.tool_calls:
+                        for tc_delta in delta.tool_calls:
+                            if tc_delta.index is not None:
+                                # New tool call or continuation
+                                if current_tool_call is None or tc_delta.index != current_tool_call.get("index"):
+                                    if current_tool_call:
+                                        tool_calls.append(current_tool_call)
+                                    current_tool_call = {
+                                        "index": tc_delta.index,
+                                        "id": tc_delta.id or "",
+                                        "name": "",
+                                        "arguments": ""
+                                    }
+                                
+                                if tc_delta.id:
+                                    current_tool_call["id"] = tc_delta.id
+                                if tc_delta.function:
+                                    if tc_delta.function.name:
+                                        current_tool_call["name"] = tc_delta.function.name
+                                    if tc_delta.function.arguments:
+                                        current_tool_call["arguments"] += tc_delta.function.arguments
+                
+                # Add last tool call
+                if current_tool_call:
+                    tool_calls.append(current_tool_call)
+                
+                # If no tool calls, we're done
+                if not tool_calls:
+                    yield "data: [DONE]\n\n"
+                    break
+                
+                # Add assistant message with tool calls to history
+                assistant_tool_calls = []
+                for tc in tool_calls:
+                    assistant_tool_calls.append({
+                        "id": tc["id"],
+                        "type": "function",
+                        "function": {
+                            "name": tc["name"],
+                            "arguments": tc["arguments"]
+                        }
+                    })
+                    yield f"data: {json.dumps({'type': 'tool_call', 'id': tc['id'], 'name': tc['name'], 'arguments': json.loads(tc['arguments'])})}\n\n"
+                
+                messages.append({
+                    "role": "assistant",
+                    "content": "".join(text_content) if text_content else None,
+                    "tool_calls": assistant_tool_calls
+                })
+                
+                # Execute each tool call
+                for tc in tool_calls:
+                    try:
+                        args = json.loads(tc["arguments"])
+                        result = await execute_tool(tc["name"], args)
+                        result_str = json.dumps(result)
+                    except Exception as e:
+                        result_str = json.dumps({"error": str(e)})
+                    
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tc["id"],
+                        "content": result_str
+                    })
+                    
+                    yield f"data: {json.dumps({'type': 'tool_result', 'id': tc['id'], 'result': json.loads(result_str)})}\n\n"
+                
+                # Continue loop for next response after tool execution
+                
+            except Exception as e:
+                logger.error(f"Chat stream error: {e}", exc_info=True)
+                yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                yield "data: [DONE]\n\n"
+                break
+    
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 @app.post("/api/execute_tool")
 async def execute_tool_endpoint(req: ToolCall):
