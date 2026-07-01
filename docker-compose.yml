@@ -17,9 +17,9 @@ services:
       # - ./wg0.conf:/etc/wireguard/wg0.conf:ro
     environment:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - AGENT_MODEL=${AGENT_MODEL:-gpt-4o-mini}
+      - AGENT_MODEL=${AGENT_MODEL:-xiaomi/mimo-v2.5}
       - AGENT_API_KEY=${AGENT_API_KEY:-}
-      - AGENT_BASE_URL=${AGENT_BASE_URL:-https://api.openai.com/v1/chat/completions}
+      - AGENT_BASE_URL=${AGENT_BASE_URL:-https://openrouter.ai/api/v1/chat/completions}
       - WG_CONFIG=${WG_CONFIG} # Pass raw WireGuard config as an env var string
       - PORT=8000
     restart: unless-stopped

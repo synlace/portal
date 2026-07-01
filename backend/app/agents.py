@@ -157,9 +157,9 @@ async def run_agent_loop(job_id: str, description: str):
     from backend.app.tool_executor import execute_tool
     
     # Sub-agent model configuration via environment variables
-    agent_model = os.environ.get("AGENT_MODEL", "gpt-4o-mini")
+    agent_model = os.environ.get("AGENT_MODEL", "xiaomi/mimo-v2.5")
     agent_api_key = os.environ.get("AGENT_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    agent_base_url = os.environ.get("AGENT_BASE_URL", "https://api.openai.com/v1/chat/completions")
+    agent_base_url = os.environ.get("AGENT_BASE_URL", "https://openrouter.ai/api/v1/chat/completions")
     
     if not agent_api_key or agent_api_key in ("your_api_key", "your_api_key_here"):
         JOBS[job_id]["status"] = "failed"
