@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal - Spec-Driven Concept Threads Mockup</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .font-mono { font-family: 'Fira Code', monospace; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: rgba(31, 41, 55, 0.3); }
+        ::-webkit-scrollbar-thumb { background: rgba(75, 85, 99, 0.5); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(107, 114, 128, 0.7); }
+        .graph-node-active { box-shadow: 0 0 12px 3px rgba(139, 92, 246, 0.4); }
+        .prose-portal h1 { font-size: 1.5rem; font-weight: 700; color: #e2e8f0; margin-bottom: 0.75rem; border-bottom: 1px solid #1f2937; padding-bottom: 0.5rem; }
+        .prose-portal h2 { font-size: 1.15rem; font-weight: 700; color: #cbd5e1; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+        .prose-portal h3 { font-size: 1rem; font-weight: 600; color: #94a3b8; margin-top: 1rem; margin-bottom: 0.4rem; }
+        .prose-portal p { color: #9ca3af; line-height: 1.65; margin-bottom: 0.75rem; font-size: 0.8rem; }
+        .prose-portal ul { list-style: disc; padding-left: 1.25rem; margin-bottom: 0.75rem; }
+        .prose-portal li { color: #9ca3af; font-size: 0.8rem; line-height: 1.6; margin-bottom: 0.25rem; }
+        .prose-portal code { background: #111827; border: 1px solid #1f2937; padding: 0.1rem 0.35rem; border-radius: 4px; font-size: 0.75rem; color: #a78bfa; }
+        .prose-portal pre { background: #030712; border: 1px solid #1f2937; border-radius: 8px; padding: 0.75rem; overflow-x: auto; margin-bottom: 0.75rem; }
+        .prose-portal pre code { background: none; border: none; padding: 0; color: #d1d5db; }
+        .prose-portal table { width: 100%; border-collapse: collapse; margin-bottom: 0.75rem; font-size: 0.75rem; }
+        .prose-portal th { background: #111827; color: #9ca3af; text-align: left; padding: 0.4rem 0.6rem; border: 1px solid #1f2937; font-weight: 600; }
+        .prose-portal td { padding: 0.4rem 0.6rem; border: 1px solid #1f2937; color: #6b7280; }
+        .prose-portal strong { color: #d1d5db; }
+        .prose-portal blockquote { border-left: 3px solid #6d28d9; padding-left: 0.75rem; color: #a78bfa; margin-bottom: 0.75rem; font-style: italic; }
+        .doc-new-line { background: rgba(139, 92, 246, 0.08); border-left: 2px solid #8b5cf6; padding-left: 0.5rem; animation: fade-highlight 2s ease-out; }
+        @keyframes fade-highlight { 0% { background: rgba(139, 92, 246, 0.2); } 100% { background: rgba(139, 92, 246, 0.08); } }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-200 h-screen flex flex-col overflow-hidden">
+
+    <!-- Header bar -->
+    <header class="border-b border-gray-800 bg-gray-900/60 backdrop-blur px-6 py-3 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="w-4 h-4 rounded-full bg-violet-500 animate-pulse"></div>
+            <h1 class="text-xl font-bold bg-gradient-to-r from-violet-400 to-indigo-400 bg-clip-text text-transparent font-mono">portal</h1>
+            <span class="text-xs text-gray-400 bg-gray-800 px-2.5 py-0.5 rounded-md font-mono">v1.0.0-beta</span>
+        </div>
+        <div class="flex items-center gap-4">
+            <span class="text-xs text-yellow-400 bg-yellow-950/20 border border-yellow-800/40 px-3 py-1 rounded-md font-mono flex items-center gap-1.5">
+                <span>⚡</span> Concepts + Spec-driven chat
+            </span>
+            <span class="text-xs text-violet-400 border border-violet-800/50 bg-violet-950/20 px-3 py-1 rounded-md font-mono">
+                Layout 3: Specs + Threads
+            </span>
+        </div>
+    </header>
+
+    <!-- Main Content Grid -->
+    <div class="flex-1 flex overflow-hidden">
+
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- LEFT PANEL: Concept Graph + Specs List                  -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <section class="w-[400px] border-r border-gray-800 bg-gray-950/35 flex flex-col shrink-0 overflow-hidden">
+
+            <!-- Graph Section Header -->
+            <div class="px-5 py-2.5 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between font-mono shrink-0">
+                <span class="text-[11px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+                    <span>📊</span> Concept Graph
+                </span>
+                <span id="thread-count-badge" class="text-[10px] text-violet-400 bg-violet-950/30 border border-violet-800/40 px-2 py-0.5 rounded-full hidden font-bold">0 threads</span>
+            </div>
+
+            <!-- Graph Canvas -->
+            <div id="graph-canvas" class="relative bg-gray-950/40 overflow-hidden flex items-center justify-center" style="min-height: 240px;">
+                <svg class="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <marker id="arrow" viewBox="0 0 10 10" refX="16" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                            <path d="M 0 0 L 10 5 L 0 10 z" fill="#4b5563" />
+                        </marker>
+                    </defs>
+                    <line x1="200" y1="48" x2="100" y2="128" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)" />
+                    <line x1="200" y1="48" x2="300" y2="128" stroke="#4b5563" stroke-width="1.5" marker-end="url(#arrow)" />
+                    <line x1="100" y1="128" x2="50"  y2="200" stroke="#374151" stroke-width="1" stroke-dasharray="3,3" marker-end="url(#arrow)" />
+                    <line x1="100" y1="128" x2="150" y2="200" stroke="#374151" stroke-width="1" stroke-dasharray="3,3" marker-end="url(#arrow)" />
+                    <line x1="300" y1="128" x2="250" y2="200" stroke="#374151" stroke-width="1" stroke-dasharray="3,3" marker-end="url(#arrow)" />
+                    <line x1="300" y1="128" x2="350" y2="200" stroke="#374151" stroke-width="1" stroke-dasharray="3,3" marker-end="url(#arrow)" />
+                </svg>
+
+                <div class="absolute inset-0 select-none">
+                    <div class="absolute" style="left: calc(50% - 100px); top: 20px; width: 200px;">
+                        <div class="bg-violet-950/80 border-2 border-violet-500 text-violet-200 p-2 rounded-lg text-center shadow-lg font-mono font-bold text-xs">
+                            Microservices<div class="text-[8px] text-violet-400 font-normal mt-0.5">Root topic</div>
+                        </div>
+                    </div>
+                    <div onclick="openThread('gateway')" id="node-gateway" class="absolute cursor-pointer group" style="left: 10px; top: 112px; width: 160px;">
+                        <div class="bg-gray-900 hover:bg-gray-800 border border-gray-700 hover:border-violet-500 text-gray-200 hover:text-violet-300 p-2 rounded-lg text-center shadow transition-all font-mono text-xs relative">
+                            API Gateway
+                            <div class="thread-badge-indicator absolute -top-1.5 -right-1.5 w-4 h-4 bg-violet-500 rounded-full border-2 border-gray-950 hidden items-center justify-center"><span class="text-[7px] text-white font-bold" id="badge-gateway"></span></div>
+                            <div class="text-[8px] text-gray-500 group-hover:text-violet-400 font-normal mt-0.5">Click to chat</div>
+                        </div>
+                    </div>
+                    <div onclick="openThread('comms')" id="node-comms" class="absolute cursor-pointer group" style="left: 220px; top: 112px; width: 160px;">
+                        <div class="bg-gray-900 hover:bg-gray-800 border border-gray-700 hover:border-violet-500 text-gray-200 hover:text-violet-300 p-2 rounded-lg text-center shadow transition-all font-mono text-xs relative">
+                            Service Comms
+                            <div class="thread-badge-indicator absolute -top-1.5 -right-1.5 w-4 h-4 bg-violet-500 rounded-full border-2 border-gray-950 hidden items-center justify-center"><span class="text-[7px] text-white font-bold" id="badge-comms"></span></div>
+                            <div class="text-[8px] text-gray-500 group-hover:text-violet-400 font-normal mt-0.5">Click to chat</div>
+                        </div>
+                    </div>
+                    <div onclick="openThread('auth')" id="node-auth" class="absolute cursor-pointer group" style="left: 10px; top: 186px; width: 100px;">
+                        <div class="bg-gray-950 border border-gray-800/80 hover:border-gray-600 text-gray-400 hover:text-gray-200 p-1.5 rounded text-center font-mono text-[10px] transition-all relative">
+                            Auth
+                            <div class="thread-badge-indicator absolute -top-1.5 -right-1.5 w-4 h-4 bg-indigo-500 rounded-full border-2 border-gray-950 hidden items-center justify-center"><span class="text-[7px] text-white font-bold" id="badge-auth"></span></div>
+                        </div>
+                    </div>
+                    <div onclick="openThread('ratelimit')" id="node-ratelimit" class="absolute cursor-pointer group" style="left: 115px; top: 186px; width: 100px;">
+                        <div class="bg-gray-950 border border-gray-800/80 hover:border-gray-600 text-gray-400 hover:text-gray-200 p-1.5 rounded text-center font-mono text-[10px] transition-all relative">
+                            Rate Limit
+                            <div class="thread-badge-indicator absolute -top-1.5 -right-1.5 w-4 h-4 bg-indigo-500 rounded-full border-2 border-gray-950 hidden items-center justify-center"><span class="text-[7px] text-white font-bold" id="badge-ratelimit"></span></div>
+                        </div>
+                    </div>
+                    <div onclick="openThread('grpc')" id="node-grpc" class="absolute cursor-pointer group" style="left: 240px; top: 186px; width: 100px;">
+                        <div class="bg-gray-950 border border-gray-800/80 hover:border-gray-600 text-gray-400 hover:text-gray-200 p-1.5 rounded text-center font-mono text-[10px] transition-all relative">
+                            gRPC
+                            <div class="thread-badge-indicator absolute -top-1.5 -right-1.5 w-4 h-4 bg-indigo-500 rounded-full border-2 border-gray-950 hidden items-center justify-center"><span class="text-[7px] text-white font-bold" id="badge-grpc"></span></div>
+                        </div>
+                    </div>
+                    <div onclick="openThread('kafka')" id="node-kafka" class="absolute cursor-pointer group" style="left: 345px; top: 186px; width: 100px;">
+                        <div class="bg-gray-950 border border-gray-800/80 hover:border-gray-600 text-gray-400 hover:text-gray-200 p-1.5 rounded text-center font-mono text-[10px] transition-all relative">
+                            Kafka
+                            <div class="thread-badge-indicator absolute -top-1.5 -right-1.5 w-4 h-4 bg-indigo-500 rounded-full border-2 border-gray-950 hidden items-center justify-center"><span class="text-[7px] text-white font-bold" id="badge-kafka"></span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ── Specs Divider ── -->
+            <div class="px-5 py-2 border-b border-t border-gray-800/50 bg-gray-900/20 flex items-center justify-between font-mono shrink-0">
+                <span class="text-[11px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+                    <span>📄</span> Specifications
+                </span>
+                <button onclick="addSpecPrompt()" class="text-[9px] text-violet-400 hover:text-violet-300 font-mono transition-colors flex items-center gap-1">
+                    <span class="text-sm leading-none">+</span> Add
+                </button>
+            </div>
+
+            <!-- ── Specs List ── -->
+            <div id="specs-list" class="flex-1 overflow-y-auto">
+                <!-- Rendered by JS -->
+            </div>
+        </section>
+
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- CENTER PANEL: Dynamic (Thread chat OR Spec split view)  -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <main class="flex-1 flex flex-col bg-gray-900/5 overflow-hidden">
+
+            <!-- Tab Bar -->
+            <div id="tab-bar" class="flex items-center border-b border-gray-800/50 bg-gray-900/20 font-mono shrink-0 overflow-x-auto">
+                <button onclick="switchTab('root')" id="tab-root" class="px-5 py-3 text-[11px] font-bold text-gray-300 uppercase tracking-wider border-b-2 border-violet-500 bg-gray-950/40 shrink-0">
+                    General
+                </button>
+                <div id="thread-tabs" class="flex items-center"></div>
+            </div>
+
+            <!-- Dynamic Content Area -->
+            <div id="content-panels" class="flex-1 overflow-hidden relative">
+
+                <!-- Root/General Panel (always present) -->
+                <div id="panel-root" class="absolute inset-0 flex flex-col overflow-hidden">
+                    <div class="px-6 py-2 bg-gray-950/60 border-b border-gray-800/40 flex items-center gap-2 font-mono text-[11px] shrink-0">
+                        <span class="w-2 h-2 bg-gray-500 rounded-full"></span>
+                        <span class="text-gray-400 font-bold">General</span>
+                        <span class="text-gray-600">—</span>
+                        <span class="text-gray-500">Top-level discussion. Click graph nodes or specs to open dedicated views.</span>
+                    </div>
+                    <div class="flex-1 overflow-y-auto p-6 space-y-4 font-mono text-xs" id="messages-root">
+                        <div class="bg-violet-950/15 border border-violet-900/30 text-violet-300 p-4 rounded text-[11px] leading-relaxed max-w-2xl">
+                            Welcome to portal. Click a concept node to open a chat thread, or click a specification below the graph to open a document with a dedicated discussion panel.
+                        </div>
+                        <div class="flex flex-col gap-1 max-w-[85%] mr-auto items-start">
+                            <span class="text-[10px] text-gray-500 font-bold px-1 uppercase">Assistant</span>
+                            <div class="p-4 rounded-lg leading-relaxed shadow bg-gray-900 border border-gray-800/80 text-gray-300">
+                                I've mapped out the core concepts in the graph on the left. You can <strong>click a concept node</strong> (like API Gateway) to start a focused chat, or <strong>click a spec</strong> from the list below to open the document side-by-side with a chat panel for discussing and editing it.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-4 border-t border-gray-800 bg-gray-950 shrink-0">
+                        <div class="flex gap-2 items-center">
+                            <button class="p-3 rounded-lg border bg-green-950/30 border-green-800/40 text-green-400 shrink-0">🎙️</button>
+                            <input id="input-root" type="text" placeholder="Type a general message..."
+                                class="flex-1 bg-gray-900 border border-gray-800 focus:border-violet-500 text-white rounded px-4 py-3 focus:outline-none transition-colors text-sm font-sans"
+                                onkeydown="if(event.key==='Enter') sendMsg('root')" />
+                            <button onclick="sendMsg('root')" class="bg-violet-600 hover:bg-violet-700 p-3 rounded-lg text-white px-5 font-bold text-sm shrink-0">Send</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <!-- RIGHT PANEL: Background Agents (scoped)                 -->
+        <!-- ═══════════════════════════════════════════════════════ -->
+        <section class="w-80 border-l border-gray-800/80 bg-gray-900/10 flex flex-col shrink-0 overflow-hidden">
+            <div class="px-5 py-3 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between font-mono shrink-0">
+                <div class="flex items-center gap-2">
+                    <span class="text-sm text-indigo-400">⚙</span>
+                    <span class="text-[11px] font-bold text-gray-400 uppercase tracking-widest">Agents</span>
+                </div>
+                <span id="agent-scope-badge" class="text-[9px] text-gray-500 bg-gray-800/50 px-2 py-0.5 rounded-full">All</span>
+            </div>
+            <div id="agents-container" class="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-xs"></div>
+        </section>
+    </div>
+
+    <script>
+    // ─── Markdown Spec Content ───────────────────────────────────────────────
+    const specDocs = {
+        'gw-design': {
+            title: 'API Gateway Design',
+            filename: 'gateway-design-v2.md',
+            linkedThread: 'gateway',
+            content: `# API Gateway Design Spec
+
+## Overview
+
+The API Gateway serves as the single entry point for all client traffic. It handles routing, authentication, rate limiting, and request transformation before forwarding to downstream microservices.
+
+## Architecture
+
+\`\`\`
+Client → [API Gateway] → Service A
+                       → Service B
+                       → Service C
+\`\`\`
+
+## Routing Rules
+
+| Path Pattern | Target Service | Weight |
+|---|---|---|
+| /api/v1/users | user-service | 50 |
+| /api/v1/orders | order-service | 30 |
+| /api/v1/products | product-service | 20 |
+
+## Rate Limiting
+
+- **Default:** 100 requests per minute per API key
+- **Algorithm:** Token bucket with sliding window fallback
+- **Burst:** Allow up to 20 requests in a 1-second burst
+
+## Authentication
+
+All requests must include a valid JWT in the \`Authorization\` header. The gateway validates the signature and extracts claims before forwarding.`
+        },
+        'ticket-401': {
+            title: 'TICKET-401 Rate Limits',
+            filename: 'TICKET-401.md',
+            linkedThread: 'ratelimit',
+            content: `# TICKET-401: Implement Distributed Rate Limiting
+
+**Status:** In Progress
+**Assignee:** backend-team
+**Priority:** High
+
+## Description
+
+Implement a distributed rate limiting system that works across multiple gateway instances using Redis as the shared state store.
+
+## Requirements
+
+- Token bucket algorithm with configurable refill rates
+- Per-API-key and per-IP limiting
+- Redis-backed for multi-instance consistency
+- Graceful degradation if Redis is unavailable
+- Expose \`X-RateLimit-Remaining\` and \`X-RateLimit-Reset\` headers
+
+## Acceptance Criteria
+
+- [ ] Rate limits enforced at 100 req/min default
+- [ ] Redis connection pool handles 10k concurrent connections
+- [ ] Fallback to in-memory when Redis is down
+- [ ] Metrics exported to Prometheus
+
+## Notes
+
+Current single-instance implementation uses in-memory counters. This ticket is about moving to a distributed model.`
+        },
+        'auth-flow': {
+            title: 'Auth Flow',
+            filename: 'auth-flow.md',
+            linkedThread: 'auth',
+            content: `# Authentication Flow
+
+## Overview
+
+This document describes the JWT-based authentication flow used across all services.
+
+## Token Structure
+
+\`\`\`json
+{
+  "sub": "user_123",
+  "iss": "portal-auth",
+  "exp": 1719849600,
+  "scope": "read write"
+}
+\`\`\`
+
+## Flow
+
+1. Client sends credentials to \`/auth/login\`
+2. Auth service validates and issues JWT + refresh token
+3. Client includes JWT in \`Authorization: Bearer <token>\` header
+4. Gateway validates signature and forwards claims to services
+
+## Refresh Strategy
+
+Access tokens expire after 15 minutes. Refresh tokens expire after 7 days. The gateway handles silent refresh via a dedicated \`/auth/refresh\` endpoint.`
+        }
+    };
+
+    // ─── State ───────────────────────────────────────────────────────────────
+    const threads = {};
+    let activeTab = 'root';
+
+    const threadDefs = {
+        gateway:   { name: 'API Gateway',    icon: '🚪', color: 'violet', placeholder: 'Ask about API Gateway routing, auth, proxies...' },
+        comms:     { name: 'Service Comms',  icon: '🔗', color: 'violet', placeholder: 'Ask about gRPC, REST, Kafka...' },
+        auth:      { name: 'Authentication', icon: '🔒', color: 'indigo', placeholder: 'Ask about JWT, OAuth, API keys...' },
+        ratelimit: { name: 'Rate Limiting',  icon: '⏱️', color: 'indigo', placeholder: 'Ask about token buckets, quotas...' },
+        grpc:      { name: 'gRPC Protocol',  icon: '📡', color: 'indigo', placeholder: 'Ask about protobuf, streaming...' },
+        kafka:     { name: 'Event Brokers',  icon: '📨', color: 'indigo', placeholder: 'Ask about Kafka, pub/sub...' },
+    };
+
+    const welcomeMessages = {
+        gateway:   'I\'ve opened a dedicated thread for <strong>API Gateway</strong>. Here we can deep-dive into routing, security, and load balancing. What would you like to explore?',
+        comms:     'Welcome to the <strong>Service Comms</strong> thread. Sync vs async patterns, message formats, delivery guarantees — what\'s your focus?',
+        auth:      'This is your <strong>Authentication</strong> thread. JWT validation, OAuth 2.0 flows, API key management. What do you need?',
+        ratelimit: 'Dedicated <strong>Rate Limiting</strong> thread is open. Token bucket algorithms, sliding windows, distributed counters. What\'s your question?',
+        grpc:      'You\'re now in the <strong>gRPC Protocol</strong> thread. Protobuf schemas, streaming modes, deadlines. Go ahead!',
+        kafka:     'This <strong>Event Brokers</strong> thread covers Kafka topics, consumer groups, event sourcing. What would you like to dig into?',
+    };
+
+    const aiResponses = {
+        gateway: [
+            'The API Gateway routes all inbound traffic. It uses path-based routing with weighted distribution across service instances.',
+            'A common pattern is to use the gateway for <strong>JWT validation</strong> — stripping invalid tokens early so backend services never see unauthorized traffic.',
+            'For load distribution, the gateway can use round-robin, least-connections, or weighted routing based on health checks.',
+        ],
+        comms: [
+            'Sync communication (REST/gRPC) provides immediate response but creates temporal coupling between services.',
+            'Async messaging via brokers like Kafka decouples services in time. Producers publish events without waiting.',
+            'gRPC uses HTTP/2 multiplexing and Protocol Buffers — typically 2-10x faster than JSON over REST.',
+        ],
+        auth: [
+            'JWT tokens encode identity claims in the payload. The gateway validates the signature and extracts user context.',
+            'OAuth 2.0 with PKCE is the recommended flow for browser-based apps. Short-lived access tokens + refresh tokens.',
+            'API keys identify the application, not the user. Best used for server-to-server communication.',
+        ],
+        ratelimit: [
+            'The <strong>Token Bucket</strong> algorithm allows burst traffic while enforcing average rates.',
+            'For distributed rate limiting, Redis-based sliding window counters provide accurate limits across instances.',
+            'Quota strategies can be tiered: free (100/min), pro (1000/min), enterprise (unlimited).',
+        ],
+        grpc: [
+            'gRPC supports four streaming modes: unary, server-side, client-side, and bidirectional — all over HTTP/2.',
+            'Protocol Buffers compile to efficient binary formats. A .proto file defines the service contract.',
+            'Deadlines propagate through the call chain. Service B inherits the remaining time from Service A.',
+        ],
+        kafka: [
+            'Kafka topics are partitioned for parallelism. Each partition is an ordered, immutable log.',
+            'Exactly-once semantics requires idempotent producers, transactional APIs, and coordinated offset commits.',
+            'Event sourcing stores state changes as a sequence of events. Current state is derived by replaying the log.',
+        ],
+    };
+
+    const specChatResponses = {
+        'gw-design': [
+            'I\'ve reviewed the routing rules table. The weighted distribution looks correct. Would you like me to add a section on circuit breaker patterns for failed upstream services?',
+            'The rate limiting section could use more detail on the Redis backend configuration. I can add connection pool settings and failover behavior.',
+            'Good spec. I\'d suggest adding a section on request/response transformation — the gateway often needs to reshape payloads between client versions and service contracts.',
+        ],
+        'ticket-401': [
+            'Looking at the acceptance criteria, the Redis connection pool spec of 10k concurrent connections might need tuning. At 100 req/min per key, that\'s manageable, but we should benchmark.',
+            'The graceful degradation requirement is solid. I\'d add a section on monitoring — when Redis falls back to in-memory, we should emit a metric so ops knows the limits are no longer distributed.',
+            'I\'ve updated the notes section with the current in-memory implementation details. The token bucket refill rate should match the per-minute window defined in the gateway design spec.',
+        ],
+        'auth-flow': [
+            'The token structure looks clean. I\'d add an \`iat\` (issued at) claim for audit logging. Also, consider adding a \`jti\` (JWT ID) for token revocation support.',
+            'The refresh strategy is good. For the silent refresh, the gateway should handle the 401 → refresh → retry flow transparently so the client never sees token expiration.',
+            'I\'d recommend adding a section on token revocation — when a user logs out or a key is compromised, we need a way to invalidate tokens before expiry.',
+        ]
+    };
+
+    let responseIdx = {};
+    let specResponseIdx = {};
+
+    // ─── Specs Rendering ─────────────────────────────────────────────────────
+    function renderSpecsList() {
+        const container = document.getElementById('specs-list');
+        container.innerHTML = Object.entries(specDocs).map(([id, spec]) => {
+            const isActive = activeTab === 'spec-' + id;
+            const linkedDef = spec.linkedThread ? threadDefs[spec.linkedThread] : null;
+            return `
+            <div onclick="openSpec('${id}')" id="spec-item-${id}"
+                class="px-5 py-3 cursor-pointer transition-all font-mono border-b border-gray-800/30 hover:bg-gray-900/40 ${
+                    isActive ? 'bg-gray-900/60 border-l-2 border-l-violet-500' : ''
+                }">
+                <div class="flex items-center gap-2 mb-0.5">
+                    <span class="text-xs ${isActive ? 'text-violet-400' : 'text-gray-500'}">📄</span>
+                    <span class="text-[11px] font-bold ${isActive ? 'text-violet-300' : 'text-gray-300'} truncate">${spec.filename}</span>
+                </div>
+                <div class="flex items-center gap-2 ml-5">
+                    ${linkedDef ? `<span class="text-[9px] text-gray-600">${linkedDef.icon} ${linkedDef.name}</span>` : ''}
+                </div>
+            </div>`;
+        }).join('');
+    }
+
+    // ─── Tab Management ──────────────────────────────────────────────────────
+    function switchTab(id) {
+        activeTab = id;
+
+        // Update tab styles
+        document.querySelectorAll('#tab-bar button').forEach(btn => {
+            btn.classList.remove('border-violet-500', 'bg-gray-950/40', 'text-gray-300');
+            btn.classList.add('border-transparent', 'text-gray-500');
+        });
+        const tab = document.getElementById('tab-' + id);
+        if (tab) {
+            tab.classList.add('border-violet-500', 'bg-gray-950/40', 'text-gray-300');
+            tab.classList.remove('border-transparent', 'text-gray-500');
+        }
+
+        // Toggle panels
+        document.querySelectorAll('#content-panels > div').forEach(p => p.classList.add('hidden'));
+        const panel = document.getElementById('panel-' + id);
+        if (panel) panel.classList.remove('hidden');
+
+        // Graph highlight
+        document.querySelectorAll('[id^="node-"]').forEach(n => n.querySelector('div').classList.remove('graph-node-active'));
+        if (id !== 'root' && !id.startsWith('spec-')) {
+            const node = document.getElementById('node-' + id);
+            if (node) node.querySelector('div').classList.add('graph-node-active');
+        }
+
+        // Scroll to bottom for thread panels
+        const mc = document.getElementById('messages-' + id);
+        if (mc) mc.scrollTop = mc.scrollHeight;
+
+        // Update agents
+        const agentScope = id.startsWith('spec-') ? specDocs[id.replace('spec-', '')]?.linkedThread || 'root' : id;
+        renderAgents(agentScope);
+        renderSpecsList();
+    }
+
+    function renderTab(id, icon, label, closable) {
+        const container = document.getElementById('thread-tabs');
+        const existing = document.getElementById('tab-' + id);
+        if (existing) return;
+        const btn = document.createElement('button');
+        btn.id = 'tab-' + id;
+        btn.className = 'px-4 py-3 text-[11px] font-bold text-gray-500 border-b-2 border-transparent shrink-0 flex items-center gap-1.5 hover:text-gray-300 transition-colors';
+        btn.onclick = () => switchTab(id);
+        let closeHtml = closable ? `<span onclick="closeTab('${id}', event)" class="text-gray-600 hover:text-red-400 ml-1 text-[9px]">✕</span>` : '';
+        btn.innerHTML = `<span>${icon}</span><span class="truncate max-w-[120px]">${label}</span>${closeHtml}`;
+        container.appendChild(btn);
+    }
+
+    function closeTab(id, e) {
+        e.stopPropagation();
+        document.getElementById('tab-' + id)?.remove();
+        document.getElementById('panel-' + id)?.remove();
+        if (id.startsWith('spec-')) {
+            const specId = id.replace('spec-', '');
+            delete specResponseIdx[specId];
+        } else {
+            delete threads[id];
+            updateGraphBadges();
+        }
+        if (activeTab === id) switchTab('root');
+    }
+
+    // ─── Thread Management ───────────────────────────────────────────────────
+    function openThread(id) {
+        if (!threads[id]) {
+            const def = threadDefs[id];
+            threads[id] = {
+                name: def.name, icon: def.icon, color: def.color, placeholder: def.placeholder,
+                messages: [{ role: 'system', text: welcomeMessages[id], time: now() }]
+            };
+            responseIdx[id] = 0;
+            renderTab(id, def.icon, def.name, true);
+            renderThreadPanel(id);
+            updateGraphBadges();
+        }
+        switchTab(id);
+    }
+
+    function renderThreadPanel(id) {
+        const container = document.getElementById('content-panels');
+        const t = threads[id];
+        const dotColor = t.color === 'indigo' ? 'bg-indigo-500' : 'bg-violet-500';
+        const panel = document.createElement('div');
+        panel.id = 'panel-' + id;
+        panel.className = 'absolute inset-0 flex flex-col overflow-hidden hidden';
+        panel.innerHTML = `
+            <div class="px-6 py-2 bg-gray-950/60 border-b border-gray-800/40 flex items-center gap-2 font-mono text-[11px] shrink-0">
+                <span class="w-2 h-2 ${dotColor} rounded-full"></span>
+                <span class="text-gray-300 font-bold">${t.icon} ${t.name}</span>
+                <span class="text-gray-600">—</span>
+                <span class="text-gray-500">Dedicated concept thread</span>
+            </div>
+            <div class="flex-1 overflow-y-auto p-6 space-y-4 font-mono text-xs" id="messages-${id}"></div>
+            <div class="p-4 border-t border-gray-800 bg-gray-950 shrink-0">
+                <div class="flex gap-2 items-center">
+                    <button class="p-3 rounded-lg border bg-green-950/30 border-green-800/40 text-green-400 shrink-0">🎙️</button>
+                    <input id="input-${id}" type="text" placeholder="${t.placeholder}"
+                        class="flex-1 bg-gray-900 border border-gray-800 focus:border-violet-500 text-white rounded px-4 py-3 focus:outline-none transition-colors text-sm font-sans"
+                        onkeydown="if(event.key==='Enter') sendMsg('${id}')" />
+                    <button onclick="sendMsg('${id}')" class="bg-violet-600 hover:bg-violet-700 p-3 rounded-lg text-white px-5 font-bold text-sm shrink-0">Send</button>
+                </div>
+            </div>`;
+        container.appendChild(panel);
+        const mc = document.getElementById('messages-' + id);
+        t.messages.forEach(msg => appendMessageToDOM(mc, msg));
+    }
+
+    // ─── Spec Panel Management ───────────────────────────────────────────────
+    function openSpec(specId) {
+        const spec = specDocs[specId];
+        if (!spec) return;
+        const tabId = 'spec-' + specId;
+
+        if (!document.getElementById('panel-' + tabId)) {
+            renderTab(tabId, '📄', spec.filename, true);
+            renderSpecPanel(specId);
+        }
+        switchTab(tabId);
+    }
+
+    function renderSpecPanel(specId) {
+        const container = document.getElementById('content-panels');
+        const spec = specDocs[specId];
+        const linkedDef = spec.linkedThread ? threadDefs[spec.linkedThread] : null;
+        const dotColor = linkedDef ? (linkedDef.color === 'indigo' ? 'bg-indigo-500' : 'bg-violet-500') : 'bg-gray-500';
+        const tabId = 'spec-' + specId;
+
+        const panel = document.createElement('div');
+        panel.id = 'panel-' + tabId;
+        panel.className = 'absolute inset-0 flex flex-col overflow-hidden hidden';
+
+        panel.innerHTML = `
+            <!-- Spec Header Bar -->
+            <div class="px-4 py-2 bg-gray-950/60 border-b border-gray-800/40 flex items-center justify-between font-mono text-[11px] shrink-0">
+                <div class="flex items-center gap-2">
+                    <span class="text-gray-400">📄</span>
+                    <span class="text-gray-300 font-bold">${spec.filename}</span>
+                    ${linkedDef ? `<span class="text-gray-600">·</span><span class="${dotColor} w-1.5 h-1.5 rounded-full inline-block"></span><span class="text-gray-500">${linkedDef.icon} ${linkedDef.name} thread</span>` : ''}
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-[9px] text-gray-600">Edits appear in real-time</span>
+                    <span class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
+                </div>
+            </div>
+
+            <!-- Split View: Document + Chat -->
+            <div class="flex-1 flex overflow-hidden">
+
+                <!-- Document Pane -->
+                <div class="flex-1 overflow-y-auto border-r border-gray-800/50 flex flex-col">
+                    <div class="px-6 py-4 flex-1 prose-portal" id="doc-${specId}">
+                        <!-- Rendered markdown -->
+                    </div>
+                    <div class="px-6 py-2 border-t border-gray-800/30 bg-gray-950/40 font-mono text-[9px] text-gray-600 flex items-center justify-between shrink-0">
+                        <span>Markdown · <span id="doc-lines-${specId}">0</span> lines</span>
+                        <span>Last read by assistant</span>
+                    </div>
+                </div>
+
+                <!-- Spec Chat Pane -->
+                <div class="w-[380px] flex flex-col shrink-0">
+                    <div class="px-4 py-2 border-b border-gray-800/40 bg-gray-900/20 font-mono text-[10px] text-gray-500 shrink-0 flex items-center gap-1.5">
+                        <span>💬</span>
+                        <span>Discussion about this spec</span>
+                    </div>
+                    <div class="flex-1 overflow-y-auto p-4 space-y-3 font-mono text-xs" id="spec-messages-${specId}"></div>
+                    <div class="p-3 border-t border-gray-800 bg-gray-950 shrink-0">
+                        <div class="flex gap-2 items-center">
+                            <input id="spec-input-${specId}" type="text" placeholder="Ask about this spec..."
+                                class="flex-1 bg-gray-900 border border-gray-800 focus:border-violet-500 text-white rounded px-3 py-2.5 focus:outline-none transition-colors text-xs font-sans"
+                                onkeydown="if(event.key==='Enter') sendSpecMsg('${specId}')" />
+                            <button onclick="sendSpecMsg('${specId}')" class="bg-violet-600 hover:bg-violet-700 p-2.5 rounded-lg text-white px-4 font-bold text-xs shrink-0">Send</button>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+
+        container.appendChild(panel);
+
+        // Render markdown
+        const docEl = document.getElementById('doc-' + specId);
+        docEl.innerHTML = marked.parse(spec.content);
+        const lineCount = spec.content.split('\n').length;
+        document.getElementById('doc-lines-' + specId).textContent = lineCount;
+
+        // Add initial system message to spec chat
+        const mc = document.getElementById('spec-messages-' + specId);
+        const sysMsg = { role: 'system', text: `Viewing <strong>${spec.filename}</strong>. Ask questions about this spec, or request changes. The AI can edit the document and you'll see updates in real-time.`, time: now() };
+        appendMessageToDOM(mc, sysMsg);
+    }
+
+    function sendSpecMsg(specId) {
+        const input = document.getElementById('spec-input-' + specId);
+        const text = input.value.trim();
+        if (!text) return;
+        const mc = document.getElementById('spec-messages-' + specId);
+        const time = now();
+
+        appendMessageToDOM(mc, { role: 'user', text, time });
+        input.value = '';
+
+        const typing = document.createElement('div');
+        typing.id = 'spec-typing-' + specId;
+        typing.className = 'text-[10px] text-gray-500 font-mono italic pl-2';
+        typing.textContent = 'Assistant is reading the spec...';
+        mc.appendChild(typing);
+        mc.scrollTop = mc.scrollHeight;
+
+        setTimeout(() => {
+            document.getElementById('spec-typing-' + specId)?.remove();
+            const responses = specChatResponses[specId] || ['I\'ve reviewed the document. What would you like to change?'];
+            const idx = specResponseIdx[specId] || 0;
+            const answer = responses[idx % responses.length];
+            specResponseIdx[specId] = idx + 1;
+            appendMessageToDOM(mc, { role: 'model', text: answer, time });
+            mc.scrollTop = mc.scrollHeight;
+
+            // Simulate doc update on certain responses
+            if (idx === 1 && specId === 'gw-design') {
+                simulateDocUpdate(specId, `\n\n## Circuit Breaker\n\nFailed upstream requests trigger a circuit breaker after 5 consecutive failures. The circuit opens for 30 seconds before attempting a half-open probe.`);
+            } else if (idx === 2 && specId === 'ticket-401') {
+                simulateDocUpdate(specId, `\n\n## Monitoring\n\nWhen Redis is unavailable and the system falls back to in-memory counters, emit a \`rate_limit_fallback_active\` metric to Prometheus. Alert if this metric is active for more than 5 minutes.`);
+            } else if (idx === 2 && specId === 'auth-flow') {
+                simulateDocUpdate(specId, `\n\n## Token Revocation\n\n- Logout invalidates the refresh token immediately\n- Access tokens are checked against a short-lived revocation list (TTL: 15 minutes)\n- Compromised API keys trigger immediate revocation of all associated tokens`);
+            }
+        }, 800 + Math.random() * 800);
+    }
+
+    function simulateDocUpdate(specId, newContent) {
+        const doc = specDocs[specId];
+        doc.content += newContent;
+        const docEl = document.getElementById('doc-' + specId);
+        if (docEl) {
+            docEl.innerHTML = marked.parse(doc.content);
+            const lineCount = doc.content.split('\n').length;
+            document.getElementById('doc-lines-' + specId).textContent = lineCount;
+
+            // Highlight new content area
+            const paragraphs = docEl.querySelectorAll('p, h2, h3, ul, pre');
+            const lastP = paragraphs[paragraphs.length - 1];
+            if (lastP) {
+                lastP.classList.add('doc-new-line');
+                lastP.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+    }
+
+    function addSpecPrompt() {
+        const name = prompt('Spec filename (e.g. new-spec.md):');
+        if (!name) return;
+        const id = name.replace(/[^a-z0-9]/gi, '-').toLowerCase();
+        specDocs[id] = {
+            title: name,
+            filename: name,
+            linkedThread: null,
+            content: `# ${name}\n\n## Overview\n\nDescribe the specification here.\n\n## Requirements\n\n- [ ] Requirement 1\n- [ ] Requirement 2`
+        };
+        renderSpecsList();
+        openSpec(id);
+    }
+
+    // ─── Agents Panel (scoped) ───────────────────────────────────────────────
+    const agentData = {
+        root: [
+            { id: 'root-analysis', desc: 'Analyzing overall project structure', status: 'completed', model: 'gpt-4o-mini', mode: 'standard', logs: ['list_directory .', 'read_file package.json'], summary: 'Project structure mapped. 3 services detected.' },
+        ],
+        gateway: [
+            { id: 'gw-proxy-setup', desc: 'Implementing reverse proxy config', status: 'running', model: 'gpt-4o', mode: 'thorough', logs: ['read_file gateway/nginx.conf', 'execute_command npm install express', 'write_file gateway/proxy.js'], summary: '' },
+            { id: 'gw-rate-limits', desc: 'Adding rate limit middleware', status: 'completed', model: 'gpt-4o-mini', mode: 'quick', logs: ['read_file gateway/middleware.js', 'edit_file gateway/middleware.js'], summary: 'Rate limit middleware added. 100 req/min default.' },
+        ],
+        comms: [
+            { id: 'grpc-server', desc: 'Boilerplate gRPC server setup', status: 'running', model: 'gpt-4o', mode: 'standard', logs: ['write_file proto/service.proto', 'execute_command protoc --js_out=.'], summary: '' },
+        ],
+        auth: [
+            { id: 'jwt-validator', desc: 'JWT validation gateway filter', status: 'completed', model: 'gpt-4o', mode: 'standard', logs: ['read_file auth/jwt.js', 'write_file auth/validator.js', 'execute_command npm test'], summary: 'JWT filter implemented. All tests passing.' },
+            { id: 'oauth-relay', desc: 'OAuth2 relay token exchange', status: 'failed', model: 'gpt-4o-mini', mode: 'quick', logs: ['read_file auth/oauth.js', 'execute_command npm install openid-client'], summary: '' },
+        ],
+        ratelimit: [
+            { id: 'token-worker', desc: 'Token bucket Redis worker', status: 'running', model: 'gpt-4o', mode: 'thorough', logs: ['read_file ratelimit/bucket.js', 'execute_command docker run redis'], summary: '' },
+        ],
+        grpc: [
+            { id: 'proto-compile', desc: 'Proto compilation pipeline', status: 'completed', model: 'gpt-4o-mini', mode: 'quick', logs: ['read_file proto/service.proto', 'execute_command protoc --js_out=.'], summary: 'Proto files compiled. JS stubs generated.' },
+        ],
+        kafka: [
+            { id: 'consumer-group', desc: 'Consumer group rebalance strategy', status: 'running', model: 'gpt-4o', mode: 'standard', logs: ['read_file kafka/consumer.js', 'edit_file kafka/consumer.js'], summary: '' },
+        ],
+    };
+
+    function renderAgents(scope) {
+        const container = document.getElementById('agents-container');
+        const scopeBadge = document.getElementById('agent-scope-badge');
+        const def = threadDefs[scope];
+        const jobs = agentData[scope] || agentData.root;
+
+        if (scope === 'root') {
+            scopeBadge.textContent = 'All';
+            scopeBadge.className = 'text-[9px] text-gray-500 bg-gray-800/50 px-2 py-0.5 rounded-full';
+        } else if (def) {
+            scopeBadge.textContent = def.name;
+            scopeBadge.className = 'text-[9px] text-violet-400 bg-violet-950/30 border border-violet-800/40 px-2 py-0.5 rounded-full';
+        }
+
+        if (jobs.length === 0) {
+            container.innerHTML = `<div class="h-full flex flex-col items-center justify-center text-center p-6 text-gray-600"><div class="text-2xl mb-2 opacity-30">⚙</div><p class="text-[11px]">No agents for this concept.</p></div>`;
+            return;
+        }
+
+        const statusStyles = {
+            running: 'text-blue-400 bg-blue-950/30 border-blue-800/40',
+            completed: 'text-green-400 bg-green-950/30 border-green-800/40',
+            pending: 'text-amber-400 bg-amber-950/30 border-amber-800/40',
+            failed: 'text-red-400 bg-red-950/30 border-red-800/40',
+        };
+
+        container.innerHTML = jobs.map(j => `
+            <div class="border border-gray-800 rounded-lg p-3 bg-gray-900/20 hover:bg-gray-900/40 transition-all shadow-sm">
+                <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-[10px] font-bold text-gray-300">${j.id}</span>
+                    <span class="text-[9px] px-2 py-0.5 rounded-full font-bold uppercase border ${statusStyles[j.status]}">${j.status}</span>
+                </div>
+                <p class="text-[10px] text-gray-400 line-clamp-2 leading-relaxed mb-1.5">${j.desc}</p>
+                <div class="flex items-center gap-2 text-[9px] text-gray-500">
+                    <span>${j.model}</span><span class="text-gray-700">·</span><span>${j.mode}</span>
+                </div>
+                ${j.logs.length > 0 ? `<div class="mt-2 pt-2 border-t border-gray-800/80 space-y-1 font-mono text-[9px]">
+                    ${j.logs.slice(0, 2).map(l => `<div class="flex items-start gap-1.5"><span class="text-indigo-400 mt-px">▸</span><span class="text-gray-400">${l}</span></div>`).join('')}
+                    ${j.logs.length > 2 ? `<span class="text-gray-600">+${j.logs.length - 2} more...</span>` : ''}
+                </div>` : ''}
+                ${j.summary ? `<div class="mt-2 pt-2 border-t border-gray-800/80 flex items-start gap-1.5 text-[9px]"><span class="text-green-400 mt-px">✓</span><span class="text-gray-400">${j.summary}</span></div>` : ''}
+            </div>
+        `).join('');
+    }
+
+    // ─── Messaging ───────────────────────────────────────────────────────────
+    function sendMsg(id) {
+        const input = document.getElementById('input-' + id);
+        const text = input.value.trim();
+        if (!text) return;
+        const t = threads[id];
+        const time = now();
+
+        appendMessageToDOM(document.getElementById('messages-' + id), { role: 'user', text, time });
+        input.value = '';
+
+        const mc = document.getElementById('messages-' + id);
+        const typing = document.createElement('div');
+        typing.id = 'typing-' + id;
+        typing.className = 'text-[10px] text-gray-500 font-mono italic pl-2';
+        typing.textContent = `${t.name} — assistant is thinking...`;
+        mc.appendChild(typing);
+        mc.scrollTop = mc.scrollHeight;
+
+        setTimeout(() => {
+            document.getElementById('typing-' + id)?.remove();
+            const responses = aiResponses[id] || ['I\'m analyzing your question.'];
+            const idx = responseIdx[id] || 0;
+            const aiMsg = { role: 'model', text: responses[idx % responses.length], time };
+            responseIdx[id] = idx + 1;
+            t.messages.push(aiMsg);
+            appendMessageToDOM(mc, aiMsg);
+            mc.scrollTop = mc.scrollHeight;
+            updateGraphBadges();
+        }, 800 + Math.random() * 800);
+    }
+
+    function appendMessageToDOM(container, msg) {
+        const div = document.createElement('div');
+        if (msg.role === 'user') {
+            div.className = 'flex flex-col gap-1 max-w-[85%] ml-auto items-end';
+            div.innerHTML = `<span class="text-[10px] text-gray-500 font-bold px-1 uppercase">You <span class="text-gray-600 normal-case font-normal">${msg.time}</span></span><div class="p-3 rounded-lg shadow bg-violet-600 text-white rounded-tr-none text-sm">${msg.text}</div>`;
+        } else if (msg.role === 'model') {
+            div.className = 'flex flex-col gap-1 max-w-[85%] mr-auto items-start';
+            div.innerHTML = `<span class="text-[10px] text-gray-500 font-bold px-1 uppercase">Assistant <span class="text-gray-600 normal-case font-normal">${msg.time}</span></span><div class="p-4 rounded-lg shadow bg-gray-900 border border-gray-800/80 text-gray-300 text-sm leading-relaxed">${msg.text}</div>`;
+        } else if (msg.role === 'system') {
+            div.className = 'bg-violet-950/15 border border-violet-900/30 text-violet-300 p-4 rounded text-[11px] leading-relaxed max-w-2xl';
+            div.innerHTML = msg.text;
+        }
+        container.appendChild(div);
+    }
+
+    function updateGraphBadges() {
+        const keys = Object.keys(threads);
+        const badge = document.getElementById('thread-count-badge');
+        if (keys.length > 0) { badge.classList.remove('hidden'); badge.classList.add('inline-flex'); badge.textContent = keys.length + ' thread' + (keys.length > 1 ? 's' : ''); }
+        else { badge.classList.add('hidden'); badge.classList.remove('inline-flex'); }
+        Object.keys(threadDefs).forEach(id => {
+            const node = document.getElementById('node-' + id);
+            const ind = node?.querySelector('.thread-badge-indicator');
+            const b = document.getElementById('badge-' + id);
+            if (threads[id]) { ind?.classList.remove('hidden'); ind?.classList.add('flex'); if (b) b.textContent = threads[id].messages.length; }
+            else { ind?.classList.add('hidden'); ind?.classList.remove('flex'); }
+        });
+    }
+
+    function now() { return new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'}); }
+
+    // Init
+    renderSpecsList();
+    renderAgents('root');
+    </script>
+</body>
+</html>

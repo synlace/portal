@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Portal - Concept Map Overlay Modal Mockup</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .font-mono {
+            font-family: 'Fira Code', monospace;
+        }
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(31, 41, 55, 0.3);
+        }
+        ::-webkit-scrollbar-thumb {
+            background: rgba(75, 85, 99, 0.5);
+            border-radius: 3px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(107, 114, 128, 0.7);
+        }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-200 h-screen flex flex-col overflow-hidden">
+
+    <!-- Header bar -->
+    <header class="border-b border-gray-800 bg-gray-900/60 backdrop-blur px-6 py-4 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-3">
+            <div class="w-4 h-4 rounded-full bg-violet-500 animate-pulse"></div>
+            <h1 class="text-xl font-bold bg-gradient-to-r from-violet-400 to-indigo-400 bg-clip-text text-transparent font-mono">
+                portal
+            </h1>
+            <span class="text-xs text-gray-400 bg-gray-800 px-2.5 py-0.5 rounded-md font-mono">v1.0.0-beta</span>
+        </div>
+        <div class="flex items-center gap-4">
+            <!-- Simulated Toggle Button in Header -->
+            <button onclick="toggleModal(true)" class="bg-violet-600/90 hover:bg-violet-600 px-4 py-1.5 rounded-md text-xs font-mono font-bold shadow-md shadow-violet-500/10 flex items-center gap-2 border border-violet-500">
+                <span>📊</span> Open Concept Graph Overlay
+            </button>
+            <span class="text-xs text-indigo-400 border border-indigo-800/50 bg-indigo-950/20 px-3 py-1 rounded-md font-mono">
+                Layout 2: Overlay Modal
+            </span>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <div class="flex-1 flex overflow-hidden relative">
+        
+        <!-- Conversation Log -->
+        <main class="flex-1 flex flex-col bg-gray-900/5 overflow-hidden">
+            <div class="px-6 py-3 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between font-mono shrink-0">
+                <span class="text-xs font-bold text-gray-400 uppercase tracking-widest">Conversation</span>
+                <span class="text-xs text-violet-400 font-semibold">4 messages</span>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-6 space-y-6">
+                <!-- System Welcome -->
+                <div class="bg-violet-950/15 border border-violet-900/30 text-violet-300 p-4 rounded text-xs leading-relaxed max-w-2xl font-mono">
+                    Welcome to portal. Use the voice button or chat box to speak with your AI assistant. Click the header button to explore the full interactive Concept Overlay.
+                </div>
+
+                <!-- User Query -->
+                <div class="flex flex-col gap-1 max-w-[80%] ml-auto items-end">
+                    <span class="text-[10px] text-gray-500 font-bold px-1 uppercase font-mono">You</span>
+                    <div class="p-4 rounded-lg text-sm leading-relaxed shadow-sm bg-violet-600 text-white rounded-tr-none">
+                        Let's analyze API gateway security and how rate limiting connects to auth.
+                    </div>
+                </div>
+
+                <!-- AI Response -->
+                <div class="flex flex-col gap-1 max-w-[80%] mr-auto items-start">
+                    <span class="text-[10px] text-gray-500 font-bold px-1 uppercase font-mono">Assistant</span>
+                    <div class="p-4 rounded-lg text-sm leading-relaxed shadow-sm bg-gray-900 border border-gray-800/80 text-gray-200 rounded-tl-none space-y-2.5">
+                        <p>At the <strong>API Gateway</strong> tier, <strong>Authentication (Auth)</strong> and <strong>Rate Limiting</strong> are deeply connected:</p>
+                        <ol class="list-decimal pl-5 space-y-1.5 text-gray-300">
+                            <li><strong>Identity-based Rate Limiting:</strong> Rate limits are calculated *after* extracting the client identity from a JWT or API Key (Auth).</li>
+                            <li><strong>Security Offloading:</strong> The Gateway validates the JWT first, preventing malicious unauthenticated traffic from consuming API rate allowances.</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Input Bar -->
+            <div class="p-4 border-t border-gray-800 bg-gray-950 shrink-0">
+                <div class="flex gap-2 items-center max-w-4xl mx-auto">
+                    <button class="p-3 rounded-lg border bg-green-950/30 border-green-800/40 text-green-400 flex items-center justify-center">
+                        🎙️
+                    </button>
+                    <input 
+                        type="text" 
+                        placeholder="Click the header button above to open the full concept graph..." 
+                        class="flex-1 bg-gray-900/80 border border-gray-800 focus:border-violet-500 text-white rounded px-4 py-3 focus:outline-none transition-colors text-sm font-sans"
+                        disabled
+                    />
+                    <button class="bg-violet-600 p-3 rounded-lg text-white">
+                        Send
+                    </button>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right: Background Agents Panel -->
+        <section class="w-80 border-l border-gray-800/80 bg-gray-900/10 flex flex-col shrink-0 overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between font-mono shrink-0">
+                <div class="flex items-center gap-2">
+                    <span class="text-sm font-bold text-gray-400 uppercase tracking-widest">Agents</span>
+                </div>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4 space-y-4">
+                <div class="text-center p-6 text-gray-600 font-mono">
+                    <p class="text-xs">No active background agents.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- OVERLAY MODAL (Initially Visible in this mockup to show off the layout) -->
+        <div id="conceptModal" class="absolute inset-0 bg-gray-950/80 backdrop-blur-sm flex items-center justify-center p-8 z-50">
+            <div class="bg-gray-900 border border-gray-800 rounded-xl shadow-2xl w-full h-full max-w-6xl max-h-[85%] flex flex-col overflow-hidden">
+                
+                <!-- Modal Header -->
+                <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-950 shrink-0">
+                    <div class="flex items-center gap-3">
+                        <span class="text-lg">📊</span>
+                        <div>
+                            <h2 class="text-sm font-bold text-gray-200 font-mono uppercase tracking-wider">Concept Explorer Map</h2>
+                            <p class="text-[10px] text-gray-500 font-mono">Conversational structures mapping topics to sub-topics</p>
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center gap-4">
+                        <div class="flex bg-gray-800 p-0.5 rounded-lg border border-gray-700 font-mono text-[10px]">
+                            <button class="px-3 py-1 rounded bg-gray-950 text-violet-400 font-bold border border-violet-800/30">Force-Directed</button>
+                            <button class="px-3 py-1 rounded text-gray-400 hover:text-gray-200">Radial Map</button>
+                            <button class="px-3 py-1 rounded text-gray-400 hover:text-gray-200">Hierarchy</button>
+                        </div>
+                        <button onclick="toggleModal(false)" class="text-gray-500 hover:text-gray-300 text-lg font-mono p-1">
+                            ✕
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Modal Core Area (Graph View) -->
+                <div class="flex-1 relative overflow-hidden bg-gray-950/40 flex items-center justify-center">
+                    
+                    <!-- SVG Connections -->
+                    <svg class="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg">
+                        <defs>
+                            <marker id="arrow" viewBox="0 0 10 10" refX="20" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151" />
+                            </marker>
+                        </defs>
+
+                        <!-- Force/Concept connections -->
+                        <line x1="550" y1="200" x2="350" y2="100" stroke="#374151" stroke-width="2" marker-end="url(#arrow)" />
+                        <line x1="550" y1="200" x2="750" y2="100" stroke="#374151" stroke-width="2" marker-end="url(#arrow)" />
+                        <line x1="350" y1="100" x2="180" y2="200" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)" />
+                        <line x1="350" y1="100" x2="350" y2="280" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)" />
+                        <line x1="750" y1="100" x2="750" y2="280" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)" />
+                        <line x1="750" y1="100" x2="920" y2="200" stroke="#374151" stroke-width="1.5" marker-end="url(#arrow)" />
+                    </svg>
+
+                    <!-- Interactive Nodes Overlay -->
+                    <div class="absolute inset-0 pointer-events-none">
+                        
+                        <!-- Core Topic -->
+                        <div class="absolute pointer-events-auto cursor-pointer" style="left: calc(50% - 110px); top: calc(50% - 40px); width: 220px;">
+                            <div class="bg-violet-950/80 hover:bg-violet-900/90 border-2 border-violet-500 text-violet-200 p-3 rounded-xl text-center shadow-2xl shadow-violet-500/20 transition-all font-mono font-bold text-xs">
+                                API Gateway
+                                <div class="text-[9px] text-violet-400 font-normal mt-1">Active Exploration Context</div>
+                            </div>
+                        </div>
+
+                        <!-- Left Branch Node 1 -->
+                        <div class="absolute pointer-events-auto cursor-pointer group" style="left: calc(50% - 310px); top: calc(50% - 140px); width: 180px;" onclick="alert('Context switched to Authentication!')">
+                            <div class="bg-gray-900 hover:bg-gray-800/90 border border-gray-700 hover:border-violet-500 text-gray-200 hover:text-violet-300 p-2.5 rounded-lg text-center shadow transition-all font-mono text-xs">
+                                Authentication
+                                <div class="text-[9px] text-gray-500 group-hover:text-violet-400/80 font-normal mt-0.5">JWT, API Keys, OAuth</div>
+                            </div>
+                        </div>
+
+                        <!-- Left-Left Sub-branch -->
+                        <div class="absolute pointer-events-auto cursor-pointer" style="left: calc(50% - 480px); top: calc(50% - 40px); width: 160px;">
+                            <div class="bg-gray-950 border border-gray-800/80 text-gray-400 p-2 rounded text-center font-mono text-[10px]">
+                                JWT Validation
+                            </div>
+                        </div>
+
+                        <!-- Left-Down Sub-branch -->
+                        <div class="absolute pointer-events-auto cursor-pointer" style="left: calc(50% - 310px); top: calc(50% + 40px); width: 160px;">
+                            <div class="bg-gray-950 border border-gray-800/80 text-gray-400 p-2 rounded text-center font-mono text-[10px]">
+                                OAuth 2.0 Flow
+                            </div>
+                        </div>
+
+                        <!-- Right Branch Node 2 -->
+                        <div class="absolute pointer-events-auto cursor-pointer group" style="left: calc(50% + 90px); top: calc(50% - 140px); width: 180px;" onclick="alert('Context switched to Rate Limiting!')">
+                            <div class="bg-gray-900 hover:bg-gray-800/90 border border-gray-700 hover:border-violet-500 text-gray-200 hover:text-violet-300 p-2.5 rounded-lg text-center shadow transition-all font-mono text-xs">
+                                Rate Limiting
+                                <div class="text-[9px] text-gray-500 group-hover:text-violet-400/80 font-normal mt-0.5">Quota, Token Bucket</div>
+                            </div>
+                        </div>
+
+                        <!-- Right-Right Sub-branch -->
+                        <div class="absolute pointer-events-auto cursor-pointer" style="left: calc(50% + 260px); top: calc(50% - 40px); width: 160px;">
+                            <div class="bg-gray-950 border border-gray-800/80 text-gray-400 p-2 rounded text-center font-mono text-[10px]">
+                                Token Bucket Alg
+                            </div>
+                        </div>
+
+                        <!-- Right-Down Sub-branch -->
+                        <div class="absolute pointer-events-auto cursor-pointer" style="left: calc(50% + 90px); top: calc(50% + 40px); width: 160px;">
+                            <div class="bg-gray-950 border border-gray-800/80 text-gray-400 p-2 rounded text-center font-mono text-[10px]">
+                                DDoS Protection
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+                <!-- Modal Controls Panel (Bottom Bar) -->
+                <div class="px-6 py-4 border-t border-gray-800 bg-gray-950/90 flex flex-col md:flex-row gap-4 items-center justify-between font-mono text-xs">
+                    <div class="flex items-center gap-6">
+                        <div class="flex items-center gap-2">
+                            <span class="text-gray-500">Depth Scope:</span>
+                            <div class="flex bg-gray-800 rounded px-1.5 py-0.5 border border-gray-700">
+                                <button class="px-1 text-gray-400">1</button>
+                                <span class="text-gray-600 px-1">·</span>
+                                <button class="px-1 text-violet-400 font-bold">2</button>
+                                <span class="text-gray-600 px-1">·</span>
+                                <button class="px-1 text-gray-400">3</button>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-gray-500">Zoom:</span>
+                            <input type="range" class="w-24 accent-violet-500 bg-gray-800 h-1 rounded" min="50" max="150" value="100">
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center gap-4">
+                        <span class="text-gray-500 text-[11px]">Clicking any item filters the conversation context to that node</span>
+                        <button onclick="toggleModal(false)" class="bg-gray-800 hover:bg-gray-700 px-4 py-2 border border-gray-700 rounded-lg text-gray-300">
+                            Dismiss Overlay
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        function toggleModal(show) {
+            const modal = document.getElementById('conceptModal');
+            if (show) {
+                modal.classList.remove('hidden');
+                modal.classList.add('flex');
+            } else {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }
+        }
+    </script>
+</body>
+</html>
