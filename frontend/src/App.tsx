@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { 
-  Play, Square, Mic, MicOff,
+  Square, Mic, MicOff,
   AlertCircle, Loader2, HelpCircle, Send, Cpu, ChevronRight, ChevronDown, Star
 } from 'lucide-react';
 import { RealtimeAgent, RealtimeSession, OpenAIRealtimeWebRTC, tool } from '@openai/agents/realtime';
@@ -1411,7 +1411,7 @@ export default function App() {
                   {isConnecting ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
                   ) : !isConnected ? (
-                    <Play className="w-4 h-4 fill-white" />
+                    <Mic className="w-4 h-4" />
                   ) : isRecording || isMuted ? (
                     <MicOff className="w-4 h-4" />
                   ) : (
@@ -1434,7 +1434,7 @@ export default function App() {
               {/* Text input */}
               <input 
                 type="text" 
-                placeholder={isConnected ? "Type a message and press enter..." : (connectionMode === 'noaudio' ? "Type a message and press enter..." : "Press play to connect, then type...")} 
+                placeholder="Type a message and press enter..." 
                 disabled={connectionMode !== 'streaming' && connectionMode !== 'noaudio' && !isConnected}
                 value={textInput}
                 onChange={(e) => setTextInput(e.target.value)}
