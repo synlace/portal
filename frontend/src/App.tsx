@@ -1028,8 +1028,8 @@ export default function App() {
   const sendTextMessage = async () => {
     if (!textInput.trim()) return;
     
-    // Streaming mode - text chat works without connection
-    if (connectionMode === 'streaming') {
+    // Streaming and noaudio modes - text chat works without connection
+    if (connectionMode === 'streaming' || connectionMode === 'noaudio') {
       await sendStreamingMessage(textInput);
       return;
     }
@@ -1466,8 +1466,8 @@ export default function App() {
                 <option value="noaudio">⌨️ Text Only</option>
               </select>
               
-              {/* Model Selector - shown in streaming mode */}
-              {connectionMode === 'streaming' && (
+              {/* Model Selector - shown in streaming and noaudio modes */}
+              {(connectionMode === 'streaming' || connectionMode === 'noaudio') && (
                 <div className="relative" ref={modelSelectorRef}>
                   <button
                     onClick={() => {
