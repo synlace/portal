@@ -427,6 +427,7 @@ export default function App() {
 
       // SDK handles function calls internally — we just listen for item_update events
       session.on('item_update', (item: any) => {
+        logger(`item_update: ${item.type} status=${item.status} name=${item.name}`);
         if (item.type === 'function_call') {
           const args = JSON.parse(item.arguments || '{}');
           if (item.status === 'in_progress') {
@@ -592,6 +593,7 @@ export default function App() {
 
   const handleToolUpdate = (msg: any) => {
     const { name, args, status, result } = msg;
+    logger(`handleToolUpdate: ${name} status=${status}`);
 
     setMessages(prev => {
       const existingIdx = prev.findIndex(m =>
