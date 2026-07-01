@@ -126,7 +126,7 @@ interface Job {
   job_id: string;
   status: 'pending' | 'running' | 'completed' | 'failed';
   description: string;
-  logs: string[];
+  logs: any[];
   result: string;
   created_at: string;
   updated_at: string;
@@ -633,113 +633,6 @@ export default function App() {
     return '🔧';
   };
 
-  const formatToolArgs = (name: string, args: any): string => {
-    if (!args) return '';
-    switch (name) {
-      case 'list_directory': return args.path || '.';
-      case 'read_file': return args.path || '';
-      case 'write_file': return args.path || '';
-      case 'edit_file': return args.path || '';
-      case 'execute_command': return args.command || '';
-      case 'create_directory': return args.path || '';
-      case 'delete_file': return args.path || '';
-      case 'move_file': return args.source && args.destination ? `${args.source} → ${args.destination}` : '';
-      default: return JSON.stringify(args);
-    }
-  };
-
-  const renderAgentLog = (log: any, idx: number) => {
-    if (typeof log === 'string') {
-      return <div key={idx} className="text-gray-400">{log}</div>;
-    }
-
-    switch (log.type) {
-      case 'start':
-        return (
-          <div key={idx} className="text-violet-400 flex items-center gap-2">
-            <span className="text-violet-500">▶</span>
-            <span>Background agent started ({log.model})</span>
-          </div>
-        );
-      case 'tool': {
-        const args = formatToolArgs(log.name, log.args);
-        const result = log.result;
-        let output = null;
-
-        if (log.name === 'execute_command' && result) {
-          const cmdResult = typeof result === 'string' ? JSON.parse(result) : result;
-          output = (
-            <div className="ml-6 mt-1 space-y-0.5">
-              <div className="text-gray-500">$ {log.args?.command}</div>
-              {cmdResult.stdout && <div className="text-green-400/80 whitespace-pre-wrap">{cmdResult.stdout.trim()}</div>}
-              {cmdResult.stderr && <div className="text-red-400/80 whitespace-pre-wrap">{cmdResult.stderr.trim()}</div>}
-              {cmdResult.exit_code !== 0 && <div className="text-amber-400/80">exit {cmdResult.exit_code}</div>}
-              {cmdResult.exit_code === 0 && !cmdResult.stdout && !cmdResult.stderr && <div className="text-gray-600">✓</div>}
-            </div>
-          );
-        } else if (log.name === 'list_directory' && result?.files) {
-          output = (
-            <div className="ml-6 mt-1 text-gray-400">
-              {result.files.map((f: any, i: number) => (
-                <div key={i}>{f.type === 'directory' ? `${f.name}/` : f.name}{f.size ? ` (${f.size}B)` : ''}</div>
-              ))}
-            </div>
-          );
-        } else if (log.name === 'read_file' && result?.content) {
-          const preview = result.content.length > 100 ? result.content.slice(0, 100) + '...' : result.content;
-          output = (
-            <div className="ml-6 mt-1 text-gray-400 whitespace-pre-wrap">{preview}</div>
-          );
-        } else if (log.name === 'write_file' && result?.message) {
-          output = <div className="ml-6 mt-1 text-green-400/80">✓ {result.message}</div>;
-        } else if (result) {
-          const resultStr = typeof result === 'string' ? result : JSON.stringify(result);
-          const preview = resultStr.length > 80 ? resultStr.slice(0, 80) + '...' : resultStr;
-          output = <div className="ml-6 mt-1 text-gray-500">{preview}</div>;
-        }
-
-        return (
-          <div key={idx}>
-            <div className="flex items-center gap-2 text-gray-300">
-              <span className="text-indigo-400">▸</span>
-              <span className="text-indigo-300">{log.name}</span>
-              {args && <span className="text-gray-500">{args}</span>}
-            </div>
-            {output}
-          </div>
-        );
-      }
-      case 'thought': {
-        const text = log.text.replace(/JOB_COMPLETED:.*$/, '').trim();
-        if (!text) return null;
-        const preview = text.length > 120 ? text.slice(0, 120) + '...' : text;
-        return (
-          <div key={idx} className="text-gray-400 italic">
-            {preview}
-          </div>
-        );
-      }
-      case 'error':
-        return (
-          <div key={idx} className="text-red-400 flex items-center gap-2">
-            <span>✕</span>
-            <span>{log.text}</span>
-          </div>
-        );
-      case 'warning':
-        return (
-          <div key={idx} className="text-amber-400 flex items-center gap-2">
-            <span>⚠</span>
-            <span>{log.text}</span>
-          </div>
-        );
-      case 'done':
-        return null;
-      default:
-        return <div key={idx} className="text-gray-400">{JSON.stringify(log)}</div>;
-    }
-  };
-
   return (
     <div className="flex flex-col h-screen bg-gray-950 font-mono">
       {/* Header bar */}
@@ -882,7 +775,12 @@ export default function App() {
                 const isExec = m.toolStatus === 'executing';
                 const isDelegated = m.toolName === 'spawn_agent';
                 const toolIcon = getToolIcon(m.toolName || '');
-                const humanReadableArgs = formatToolArgs(m.toolName || '', m.toolArgs);
+                const humanReadableArgs = m.toolName === 'execute_command' ? m.toolArgs?.command :
+                  m.toolName === 'read_file' || m.toolName === 'write_file' || m.toolName === 'edit_file' ? m.toolArgs?.path :
+                  m.toolName === 'list_directory' ? (m.toolArgs?.path || '.') :
+                  m.toolName === 'move_file' ? (m.toolArgs?.source && m.toolArgs?.destination ? `${m.toolArgs.source} → ${m.toolArgs.destination}` : '') :
+                  m.toolName === 'spawn_agent' ? m.toolArgs?.description :
+                  m.toolName === 'get_agent_status' ? m.toolArgs?.job_id : '';
                 
                 // Parse execute_command results for nice display
                 let cmdOutput = null;
@@ -1043,6 +941,7 @@ export default function App() {
                     <div className="text-[10px] font-bold text-gray-500 uppercase mb-2 px-1">Active</div>
                     {activeJobs.map((j) => {
                       const isSelected = selectedJobId === j.job_id;
+                      const toolLogs = j.logs.filter((l: any) => l.type === 'tool');
                       return (
                         <div 
                           key={j.job_id}
@@ -1063,25 +962,43 @@ export default function App() {
                             </span>
                           </div>
 
-                          <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-3">
+                          <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-2">
                             {j.description}
                           </p>
 
                           {isSelected && (
-                            <div className="mt-4 pt-3 border-t border-gray-800/80 space-y-3">
-                              <div className="text-[10px] font-bold text-gray-500 uppercase">Agent Logs:</div>
-                              <div className="bg-gray-950 border border-gray-800/80 p-3 rounded text-[11px] leading-relaxed max-h-60 overflow-y-auto space-y-2 text-gray-300 font-sans">
-                                {j.logs.map((log, lIdx) => renderAgentLog(log, lIdx))}
+                            <div className="mt-3 pt-3 border-t border-gray-800/80">
+                              <button 
+                                className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 uppercase mb-2 hover:text-gray-400"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <ChevronDown className="w-3 h-3" />
+                                Agent ({j.logs[0]?.model || 'model'})
+                              </button>
+                              <div className="bg-gray-950 border border-gray-800/80 p-2.5 rounded text-[11px] leading-relaxed max-h-48 overflow-y-auto space-y-1.5 text-gray-300 font-mono">
+                                {toolLogs.map((log: any, lIdx: number) => {
+                                  const args = log.name === 'execute_command' ? log.args?.command : 
+                                               log.name === 'read_file' || log.name === 'write_file' ? log.args?.path :
+                                               log.name === 'list_directory' ? (log.args?.path || '.') : '';
+                                  let output = '';
+                                  if (log.name === 'execute_command' && log.result) {
+                                    const cmdResult = typeof log.result === 'string' ? JSON.parse(log.result) : log.result;
+                                    output = cmdResult.stdout?.trim() || (cmdResult.exit_code === 0 ? '✓' : `exit ${cmdResult.exit_code}`);
+                                  } else if (log.name === 'list_directory' && log.result?.files) {
+                                    output = log.result.files.map((f: any) => f.type === 'directory' ? `${f.name}/` : f.name).join(', ');
+                                  } else if (log.name === 'read_file' && log.result?.content) {
+                                    output = log.result.content.length > 60 ? log.result.content.slice(0, 60) + '...' : log.result.content;
+                                  } else if (log.name === 'write_file' && log.result?.message) {
+                                    output = '✓';
+                                  }
+                                  return (
+                                    <div key={lIdx} className="flex flex-col">
+                                      <span className="text-indigo-400">▸ {log.name} <span className="text-gray-500">{args}</span></span>
+                                      {output && <span className="text-gray-500 ml-4">{output}</span>}
+                                    </div>
+                                  );
+                                })}
                               </div>
-                              
-                              {j.result && (
-                                <div className="space-y-1.5">
-                                  <div className="text-[10px] font-bold text-green-500 uppercase">Final Output:</div>
-                                  <div className="bg-green-950/15 border border-green-900/30 text-green-300 p-3 rounded text-xs leading-relaxed font-sans">
-                                    {j.result}
-                                  </div>
-                                </div>
-                              )}
                             </div>
                           )}
 
@@ -1100,6 +1017,8 @@ export default function App() {
                     <div className="text-[10px] font-bold text-gray-500 uppercase mb-2 px-1">Completed</div>
                     {completedJobs.map((j) => {
                       const isSelected = selectedJobId === j.job_id;
+                      const toolLogs = j.logs.filter((l: any) => l.type === 'tool');
+                      const summaryLog = j.logs.find((l: any) => l.type === 'summary');
                       return (
                         <div 
                           key={j.job_id}
@@ -1110,28 +1029,52 @@ export default function App() {
                         >
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-xs font-bold text-gray-300">{j.job_id}</span>
-                            <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border ${getStatusColor(j.status)}`}>
+                            <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border text-green-400 bg-green-950/30 border-green-800/40">
                               completed
                             </span>
                           </div>
 
-                          <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-3">
+                          <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-2">
                             {j.description}
                           </p>
 
                           {isSelected && (
-                            <div className="mt-4 pt-3 border-t border-gray-800/80 space-y-3">
-                              <div className="text-[10px] font-bold text-gray-500 uppercase">Agent Logs:</div>
-                              <div className="bg-gray-950 border border-gray-800/80 p-3 rounded text-[11px] leading-relaxed max-h-60 overflow-y-auto space-y-2 text-gray-300 font-sans">
-                                {j.logs.map((log, lIdx) => renderAgentLog(log, lIdx))}
+                            <div className="mt-3 pt-3 border-t border-gray-800/80">
+                              <button 
+                                className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 uppercase mb-2 hover:text-gray-400"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <ChevronDown className="w-3 h-3" />
+                                Agent ({j.logs[0]?.model || 'model'})
+                              </button>
+                              <div className="bg-gray-950 border border-gray-800/80 p-2.5 rounded text-[11px] leading-relaxed max-h-48 overflow-y-auto space-y-1.5 text-gray-300 font-mono">
+                                {toolLogs.map((log: any, lIdx: number) => {
+                                  const args = log.name === 'execute_command' ? log.args?.command : 
+                                               log.name === 'read_file' || log.name === 'write_file' ? log.args?.path :
+                                               log.name === 'list_directory' ? (log.args?.path || '.') : '';
+                                  let output = '';
+                                  if (log.name === 'execute_command' && log.result) {
+                                    const cmdResult = typeof log.result === 'string' ? JSON.parse(log.result) : log.result;
+                                    output = cmdResult.stdout?.trim() || (cmdResult.exit_code === 0 ? '✓' : `exit ${cmdResult.exit_code}`);
+                                  } else if (log.name === 'list_directory' && log.result?.files) {
+                                    output = log.result.files.map((f: any) => f.type === 'directory' ? `${f.name}/` : f.name).join(', ');
+                                  } else if (log.name === 'read_file' && log.result?.content) {
+                                    output = log.result.content.length > 60 ? log.result.content.slice(0, 60) + '...' : log.result.content;
+                                  } else if (log.name === 'write_file' && log.result?.message) {
+                                    output = '✓';
+                                  }
+                                  return (
+                                    <div key={lIdx} className="flex flex-col">
+                                      <span className="text-indigo-400">▸ {log.name} <span className="text-gray-500">{args}</span></span>
+                                      {output && <span className="text-gray-500 ml-4">{output}</span>}
+                                    </div>
+                                  );
+                                })}
                               </div>
-                              
-                              {j.result && (
-                                <div className="space-y-1.5">
-                                  <div className="text-[10px] font-bold text-green-500 uppercase">Final Output:</div>
-                                  <div className="bg-green-950/15 border border-green-900/30 text-green-300 p-3 rounded text-xs leading-relaxed font-sans">
-                                    {j.result}
-                                  </div>
+                              {summaryLog && (
+                                <div className="mt-2 flex items-start gap-2 text-xs">
+                                  <span className="text-green-400 mt-0.5">✓</span>
+                                  <span className="text-gray-400">{summaryLog.text}</span>
                                 </div>
                               )}
                             </div>
@@ -1152,6 +1095,7 @@ export default function App() {
                     <div className="text-[10px] font-bold text-gray-500 uppercase mb-2 px-1">Failed</div>
                     {failedJobs.map((j) => {
                       const isSelected = selectedJobId === j.job_id;
+                      const errorLog = j.logs.find((l: any) => l.type === 'error');
                       return (
                         <div 
                           key={j.job_id}
@@ -1162,20 +1106,20 @@ export default function App() {
                         >
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-xs font-bold text-gray-300">{j.job_id}</span>
-                            <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border ${getStatusColor(j.status)}`}>
+                            <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border text-red-400 bg-red-950/30 border-red-800/40">
                               failed
                             </span>
                           </div>
 
-                          <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-3">
+                          <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-2">
                             {j.description}
                           </p>
 
-                          {isSelected && j.logs.length > 0 && (
-                            <div className="mt-4 pt-3 border-t border-gray-800/80 space-y-3">
-                              <div className="text-[10px] font-bold text-gray-500 uppercase">Agent Logs:</div>
-                              <div className="bg-gray-950 border border-gray-800/80 p-3 rounded text-[11px] leading-relaxed max-h-60 overflow-y-auto space-y-2 text-gray-300 font-sans">
-                                {j.logs.map((log, lIdx) => renderAgentLog(log, lIdx))}
+                          {isSelected && errorLog && (
+                            <div className="mt-3 pt-3 border-t border-gray-800/80">
+                              <div className="flex items-start gap-2 text-xs">
+                                <span className="text-red-400 mt-0.5">✕</span>
+                                <span className="text-red-400">{errorLog.text}</span>
                               </div>
                             </div>
                           )}

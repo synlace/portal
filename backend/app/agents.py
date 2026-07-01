@@ -223,7 +223,11 @@ async def run_agent_loop(job_id: str, description: str):
                     if "JOB_COMPLETED" in clean_text:
                         JOBS[job_id]["status"] = "completed"
                         JOBS[job_id]["result"] = clean_text
-                        JOBS[job_id]["logs"].append({"type": "done"})
+                        # Extract summary after JOB_COMPLETED marker
+                        job_completed_idx = clean_text.find("JOB_COMPLETED:")
+                        if job_completed_idx != -1:
+                            summary = clean_text[job_completed_idx + len("JOB_COMPLETED:"):].strip()
+                            JOBS[job_id]["logs"].append({"type": "summary", "text": summary})
                         return
 
                 if tool_calls:
