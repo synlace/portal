@@ -203,6 +203,8 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState('gpt-4o-mini');
   const [availableModels, setAvailableModels] = useState<Array<{id: string, name: string, provider: string, pricing?: {prompt: number, completion: number}}>>([]);
   const [showModelSelector, setShowModelSelector] = useState(false);
+  const [modelSearch, setModelSearch] = useState('');
+  const modelSelectorRef = useRef<HTMLDivElement>(null);
   const [favoriteModels, setFavoriteModels] = useState<string[]>(() => {
     const saved = localStorage.getItem('portal_favorite_models');
     return saved ? JSON.parse(saved) : [];
@@ -314,6 +316,18 @@ export default function App() {
       return newFavorites;
     });
   };
+
+  // Close model selector when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (modelSelectorRef.current && !modelSelectorRef.current.contains(event.target as Node)) {
+        setShowModelSelector(false);
+        setModelSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   // Spacebar push-to-talk in streaming mode
   useEffect(() => {
@@ -1491,9 +1505,12 @@ export default function App() {
             
             {/* Model Selector */}
             {connectionMode === 'streaming' && (
-              <div className="relative">
+              <div className="relative" ref={modelSelectorRef}>
                 <button
-                  onClick={() => setShowModelSelector(!showModelSelector)}
+                  onClick={() => {
+                    setShowModelSelector(!showModelSelector);
+                    if (!showModelSelector) setModelSearch('');
+                  }}
                   className="text-[10px] px-2 py-1 rounded border bg-gray-800/50 border-gray-700 text-gray-400 hover:text-gray-300 hover:border-gray-600 transition-colors flex items-center gap-1.5"
                 >
                   <Cpu className="w-3 h-3" />
@@ -1502,88 +1519,124 @@ export default function App() {
                 </button>
                 
                 {showModelSelector && (
-                  <div className="absolute bottom-full left-0 mb-1 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 z-50 min-w-[280px] max-h-[400px] overflow-y-auto">
-                    {/* Favorites Section */}
-                    {favoriteModels.length > 0 && (
-                      <>
-                        <div className="px-3 py-1 text-[9px] text-gray-500 uppercase font-semibold border-b border-gray-800">
-                          Favorites
-                        </div>
-                        {availableModels
-                          .filter(m => favoriteModels.includes(m.id))
-                          .map((model) => (
-                            <div
-                              key={model.id}
-                              className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 flex items-center justify-between ${
-                                selectedModel === model.id ? 'text-violet-400 bg-gray-800/50' : 'text-gray-300'
-                              }`}
-                            >
-                              <button
-                                onClick={() => {
-                                  setSelectedModel(model.id);
-                                  setShowModelSelector(false);
-                                }}
-                                className="flex-1 text-left"
-                              >
-                                <div className="flex items-center gap-2">
-                                  <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-                                  <span>{model.name}</span>
-                                </div>
-                                <span className="text-[9px] text-gray-500 ml-5">{model.provider}</span>
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleFavoriteModel(model.id);
-                                }}
-                                className="p-1 hover:bg-gray-700 rounded"
-                              >
-                                <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-                              </button>
-                            </div>
-                          ))}
-                        <div className="border-b border-gray-800 my-1"></div>
-                      </>
-                    )}
-                    
-                    {/* All Models */}
-                    <div className="px-3 py-1 text-[9px] text-gray-500 uppercase font-semibold">
-                      {favoriteModels.length > 0 ? 'All Models' : 'Models'}
+                  <div className="absolute bottom-full left-0 mb-1 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 min-w-[300px] max-h-[450px] flex flex-col">
+                    {/* Search Field */}
+                    <div className="p-2 border-b border-gray-800">
+                      <input
+                        type="text"
+                        placeholder="Search models..."
+                        value={modelSearch}
+                        onChange={(e) => setModelSearch(e.target.value)}
+                        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-violet-500"
+                        autoFocus
+                      />
                     </div>
-                    {availableModels.map((model) => (
-                      <div
-                        key={model.id}
-                        className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 flex items-center justify-between ${
-                          selectedModel === model.id ? 'text-violet-400 bg-gray-800/50' : 'text-gray-300'
-                        }`}
-                      >
-                        <button
-                          onClick={() => {
-                            setSelectedModel(model.id);
-                            setShowModelSelector(false);
-                          }}
-                          className="flex-1 text-left"
-                        >
-                          <span>{model.name}</span>
-                          <span className="text-[9px] text-gray-500 ml-2">{model.provider}</span>
-                          {model.pricing && (
-                            <span className="text-[9px] text-gray-600 ml-2">
-                              ${model.pricing.prompt.toFixed(6)}/tok
-                            </span>
-                          )}
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            toggleFavoriteModel(model.id);
-                          }}
-                          className="p-1 hover:bg-gray-700 rounded"
-                          title={favoriteModels.includes(model.id) ? "Remove from favorites" : "Add to favorites"}
-                        >
-                          <Star className={`w-3 h-3 ${favoriteModels.includes(model.id) ? 'text-yellow-500 fill-yellow-500' : 'text-gray-600'}`} />
-                        </button>
+                    
+                    {/* Models List */}
+                    <div className="overflow-y-auto flex-1 py-1">
+                      {/* Favorites Section */}
+                      {favoriteModels.length > 0 && !modelSearch && (
+                        <>
+                          <div className="px-3 py-1 text-[9px] text-gray-500 uppercase font-semibold border-b border-gray-800">
+                            Favorites
+                          </div>
+                          {availableModels
+                            .filter(m => favoriteModels.includes(m.id))
+                            .map((model) => (
+                              <div
+                                key={model.id}
+                                className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 flex items-center justify-between ${
+                                  selectedModel === model.id ? 'text-violet-400 bg-gray-800/50' : 'text-gray-300'
+                                }`}
+                              >
+                                <button
+                                  onClick={() => {
+                                    setSelectedModel(model.id);
+                                    setShowModelSelector(false);
+                                    setModelSearch('');
+                                  }}
+                                  className="flex-1 text-left"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+                                    <span>{model.name}</span>
+                                  </div>
+                                  <span className="text-[9px] text-gray-500 ml-5">{model.provider}</span>
+                                </button>
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    toggleFavoriteModel(model.id);
+                                  }}
+                                  className="p-1 hover:bg-gray-700 rounded"
+                                >
+                                  <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+                                </button>
+                              </div>
+                            ))}
+                          <div className="border-b border-gray-800 my-1"></div>
+                        </>
+                      )}
+                      
+                      {/* All Models */}
+                      <div className="px-3 py-1 text-[9px] text-gray-500 uppercase font-semibold">
+                        {modelSearch ? 'Search Results' : (favoriteModels.length > 0 ? 'All Models' : 'Models')}
                       </div>
-                    ))}
+                      {availableModels
+                        .filter(m => {
+                          if (!modelSearch) return true;
+                          const search = modelSearch.toLowerCase();
+                          return m.name.toLowerCase().includes(search) || 
+                                 m.id.toLowerCase().includes(search) ||
+                                 m.provider.toLowerCase().includes(search);
+                        })
+                        .map((model) => (
+                          <div
+                            key={model.id}
+                            className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 flex items-center justify-between ${
+                              selectedModel === model.id ? 'text-violet-400 bg-gray-800/50' : 'text-gray-300'
+                            }`}
+                          >
+                            <button
+                              onClick={() => {
+                                setSelectedModel(model.id);
+                                setShowModelSelector(false);
+                                setModelSearch('');
+                              }}
+                              className="flex-1 text-left"
+                            >
+                              <span>{model.name}</span>
+                              <span className="text-[9px] text-gray-500 ml-2">{model.provider}</span>
+                              {model.pricing && (
+                                <span className="text-[9px] text-gray-600 ml-2">
+                                  ${model.pricing.prompt.toFixed(6)}/tok
+                                </span>
+                              )}
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleFavoriteModel(model.id);
+                              }}
+                              className="p-1 hover:bg-gray-700 rounded"
+                              title={favoriteModels.includes(model.id) ? "Remove from favorites" : "Add to favorites"}
+                            >
+                              <Star className={`w-3 h-3 ${favoriteModels.includes(model.id) ? 'text-yellow-500 fill-yellow-500' : 'text-gray-600'}`} />
+                            </button>
+                          </div>
+                        ))}
+                      {availableModels.filter(m => {
+                        if (!modelSearch) return true;
+                        const search = modelSearch.toLowerCase();
+                        return m.name.toLowerCase().includes(search) || 
+                               m.id.toLowerCase().includes(search) ||
+                               m.provider.toLowerCase().includes(search);
+                      }).length === 0 && (
+                        <div className="px-3 py-4 text-xs text-gray-500 text-center">
+                          No models found
+                        </div>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>
