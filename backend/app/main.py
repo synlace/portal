@@ -239,23 +239,50 @@ class ChatRequest(BaseModel):
     model: Optional[str] = "gpt-4o-mini"
     base_url: Optional[str] = None
 
-AVAILABLE_MODELS = [
+# OpenAI models (static list)
+OPENAI_MODELS = [
     {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "provider": "OpenAI"},
     {"id": "gpt-4o", "name": "GPT-4o", "provider": "OpenAI"},
     {"id": "gpt-4.1-mini", "name": "GPT-4.1 Mini", "provider": "OpenAI"},
     {"id": "gpt-4.1-nano", "name": "GPT-4.1 Nano", "provider": "OpenAI"},
-    {"id": "xiaomi/mimo-v2.5", "name": "Xiaomi MiMo V2.5", "provider": "OpenRouter"},
-    {"id": "anthropic/claude-sonnet-4", "name": "Claude Sonnet 4", "provider": "OpenRouter"},
-    {"id": "anthropic/claude-3.5-haiku", "name": "Claude 3.5 Haiku", "provider": "OpenRouter"},
-    {"id": "google/gemini-2.5-flash", "name": "Gemini 2.5 Flash", "provider": "OpenRouter"},
-    {"id": "meta-llama/llama-4-scout", "name": "Llama 4 Scout", "provider": "OpenRouter"},
-    {"id": "deepseek/deepseek-chat-v3-0324", "name": "DeepSeek V3", "provider": "OpenRouter"},
 ]
 
 @app.get("/api/models")
 async def list_models():
     """List available models for streaming chat."""
-    return {"models": AVAILABLE_MODELS}
+    openrouter_models = []
+    
+    # Fetch OpenRouter models if API key is available
+    openrouter_key = os.environ.get("OPENROUTER_API_KEY")
+    if openrouter_key:
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    "https://openrouter.ai/api/v1/models",
+                    headers={"Authorization": f"Bearer {openrouter_key}"},
+                    timeout=10.0
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    for m in data.get("data", []):
+                        # Extract just the model name without provider prefix
+                        model_id = m.get("id", "")
+                        display_name = m.get("name", model_id)
+                        pricing = m.get("pricing", {})
+                        
+                        openrouter_models.append({
+                            "id": model_id,
+                            "name": display_name,
+                            "provider": "OpenRouter",
+                            "pricing": {
+                                "prompt": float(pricing.get("prompt", 0)),
+                                "completion": float(pricing.get("completion", 0))
+                            }
+                        })
+        except Exception as e:
+            logger.error(f"Failed to fetch OpenRouter models: {e}")
+    
+    return {"models": OPENAI_MODELS + openrouter_models}
 
 @app.post("/api/chat")
 async def chat_stream(request: ChatRequest):

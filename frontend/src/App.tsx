@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { 
   Play, Square, Mic, MicOff,
-  AlertCircle, Loader2, HelpCircle, Send, Cpu, ChevronRight, ChevronDown 
+  AlertCircle, Loader2, HelpCircle, Send, Cpu, ChevronRight, ChevronDown, Star
 } from 'lucide-react';
 import { RealtimeAgent, RealtimeSession, OpenAIRealtimeWebRTC, tool } from '@openai/agents/realtime';
 import toolsSchema from '../../tools.json';
@@ -201,8 +201,12 @@ export default function App() {
 
   // Model selection for streaming mode
   const [selectedModel, setSelectedModel] = useState('gpt-4o-mini');
-  const [availableModels, setAvailableModels] = useState<Array<{id: string, name: string, provider: string}>>([]);
+  const [availableModels, setAvailableModels] = useState<Array<{id: string, name: string, provider: string, pricing?: {prompt: number, completion: number}}>>([]);
   const [showModelSelector, setShowModelSelector] = useState(false);
+  const [favoriteModels, setFavoriteModels] = useState<string[]>(() => {
+    const saved = localStorage.getItem('portal_favorite_models');
+    return saved ? JSON.parse(saved) : [];
+  });
 
   // Refs for SDK session and audio
   const sessionRef = useRef<RealtimeSession | null>(null);
@@ -299,6 +303,17 @@ export default function App() {
     };
     fetchModels();
   }, []);
+
+  // Toggle model favorite
+  const toggleFavoriteModel = (modelId: string) => {
+    setFavoriteModels(prev => {
+      const newFavorites = prev.includes(modelId)
+        ? prev.filter(id => id !== modelId)
+        : [...prev, modelId];
+      localStorage.setItem('portal_favorite_models', JSON.stringify(newFavorites));
+      return newFavorites;
+    });
+  };
 
   // Spacebar push-to-talk in streaming mode
   useEffect(() => {
@@ -1487,21 +1502,87 @@ export default function App() {
                 </button>
                 
                 {showModelSelector && (
-                  <div className="absolute bottom-full left-0 mb-1 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 z-50 min-w-[200px]">
+                  <div className="absolute bottom-full left-0 mb-1 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 z-50 min-w-[280px] max-h-[400px] overflow-y-auto">
+                    {/* Favorites Section */}
+                    {favoriteModels.length > 0 && (
+                      <>
+                        <div className="px-3 py-1 text-[9px] text-gray-500 uppercase font-semibold border-b border-gray-800">
+                          Favorites
+                        </div>
+                        {availableModels
+                          .filter(m => favoriteModels.includes(m.id))
+                          .map((model) => (
+                            <div
+                              key={model.id}
+                              className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 flex items-center justify-between ${
+                                selectedModel === model.id ? 'text-violet-400 bg-gray-800/50' : 'text-gray-300'
+                              }`}
+                            >
+                              <button
+                                onClick={() => {
+                                  setSelectedModel(model.id);
+                                  setShowModelSelector(false);
+                                }}
+                                className="flex-1 text-left"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+                                  <span>{model.name}</span>
+                                </div>
+                                <span className="text-[9px] text-gray-500 ml-5">{model.provider}</span>
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleFavoriteModel(model.id);
+                                }}
+                                className="p-1 hover:bg-gray-700 rounded"
+                              >
+                                <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+                              </button>
+                            </div>
+                          ))}
+                        <div className="border-b border-gray-800 my-1"></div>
+                      </>
+                    )}
+                    
+                    {/* All Models */}
+                    <div className="px-3 py-1 text-[9px] text-gray-500 uppercase font-semibold">
+                      {favoriteModels.length > 0 ? 'All Models' : 'Models'}
+                    </div>
                     {availableModels.map((model) => (
-                      <button
+                      <div
                         key={model.id}
-                        onClick={() => {
-                          setSelectedModel(model.id);
-                          setShowModelSelector(false);
-                        }}
                         className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 flex items-center justify-between ${
                           selectedModel === model.id ? 'text-violet-400 bg-gray-800/50' : 'text-gray-300'
                         }`}
                       >
-                        <span>{model.name}</span>
-                        <span className="text-[9px] text-gray-500">{model.provider}</span>
-                      </button>
+                        <button
+                          onClick={() => {
+                            setSelectedModel(model.id);
+                            setShowModelSelector(false);
+                          }}
+                          className="flex-1 text-left"
+                        >
+                          <span>{model.name}</span>
+                          <span className="text-[9px] text-gray-500 ml-2">{model.provider}</span>
+                          {model.pricing && (
+                            <span className="text-[9px] text-gray-600 ml-2">
+                              ${model.pricing.prompt.toFixed(6)}/tok
+                            </span>
+                          )}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleFavoriteModel(model.id);
+                          }}
+                          className="p-1 hover:bg-gray-700 rounded"
+                          title={favoriteModels.includes(model.id) ? "Remove from favorites" : "Add to favorites"}
+                        >
+                          <Star className={`w-3 h-3 ${favoriteModels.includes(model.id) ? 'text-yellow-500 fill-yellow-500' : 'text-gray-600'}`} />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 )}
