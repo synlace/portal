@@ -163,13 +163,18 @@
   {
     "type": "function",
     "name": "spawn_agent",
-    "description": "Delegate a complex, multi-step coding task to a background agent that runs independently. Returns a unique job ID. This task can specify a model via configuration.",
+    "description": "Delegate a task to a background agent that runs independently. Returns a unique job ID. Use mode to control agent behavior.",
     "parameters": {
       "type": "object",
       "properties": {
         "description": {
           "type": "string",
           "description": "A detailed description of the task for the agent, e.g. 'write unit tests for file.py'."
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["quick", "standard", "thorough"],
+          "description": "Agent execution mode. 'quick' (3 steps) for simple commands, 'standard' (8 steps) for most tasks, 'thorough' (12 steps) for complex multi-file changes. Default: standard."
         }
       },
       "required": [

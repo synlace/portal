@@ -190,13 +190,19 @@ async def execute_tool(name: str, args: Dict[str, Any]) -> Dict[str, Any]:
             description = args.get("description")
             if not description:
                 return {"error": "Missing parameter 'description'."}
+            
+            mode = args.get("mode", "standard")
+            valid_modes = ("quick", "standard", "thorough")
+            if mode not in valid_modes:
+                return {"error": f"Invalid mode '{mode}'. Must be one of: {', '.join(valid_modes)}"}
                 
             from backend.app.agents import spawn_job
-            job_id = spawn_job(description)
+            job_id = spawn_job(description, mode=mode)
             return {
                 "success": True,
                 "job_id": job_id,
-                "message": f"Background agent spawned with ID: {job_id}. "
+                "mode": mode,
+                "message": f"Background agent spawned with ID: {job_id} (mode: {mode}). "
                            "You can check its status using get_agent_status."
             }
 

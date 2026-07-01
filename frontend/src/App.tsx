@@ -169,7 +169,7 @@ export default function App() {
   const [errorMsg, setErrorMsg] = useState('');
 
   // Voice States
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted] = useState(false);
   const [isModelTalking, _setIsModelTalking] = useState(false);
   const isModelTalkingRef = useRef(false);
   const setIsModelTalking = (val: boolean) => {
@@ -1384,12 +1384,18 @@ export default function App() {
                     if (!isConnected) {
                       startSession();
                     } else if (connectionMode === 'webrtc') {
-                      setIsMuted(!isMuted);
+                      // Right-click or shift-click to disconnect in webrtc mode
+                      stopSession();
                     } else {
                       toggleRecording();
                     }
                   }}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    if (isConnected) stopSession();
+                  }}
                   disabled={isConnecting}
+                  title={!isConnected ? "Click to connect" : (connectionMode === 'webrtc' ? "Click to mute/unmute, right-click to disconnect" : "Click to record")}
                   className={`p-3 rounded-lg border transition-all flex items-center justify-center ${
                     isConnecting
                       ? 'bg-gray-800 border-gray-700 text-gray-400'
@@ -1414,11 +1420,22 @@ export default function App() {
                 </button>
               )}
               
+              {/* Disconnect button - shown when connected */}
+              {isConnected && (
+                <button 
+                  onClick={stopSession}
+                  className="p-3 rounded-lg border bg-red-950/40 hover:bg-red-950/80 border-red-800 text-red-300 transition-all flex items-center justify-center"
+                  title="Disconnect"
+                >
+                  <Square className="w-4 h-4 fill-red-300" />
+                </button>
+              )}
+              
               {/* Text input */}
               <input 
                 type="text" 
-                placeholder={connectionMode === 'noaudio' ? "Type a message and press enter..." : (isConnected ? "Type a message and press enter..." : "Press mic to connect, then type...")} 
-                disabled={connectionMode !== 'streaming' && !isConnected}
+                placeholder={isConnected ? "Type a message and press enter..." : (connectionMode === 'noaudio' ? "Type a message and press enter..." : "Press mic to connect, then type...")} 
+                disabled={connectionMode !== 'streaming' && connectionMode !== 'noaudio' && !isConnected}
                 value={textInput}
                 onChange={(e) => setTextInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && sendTextMessage()}
@@ -1428,7 +1445,7 @@ export default function App() {
               {/* Send button */}
               <button 
                 onClick={sendTextMessage}
-                disabled={connectionMode !== 'streaming' && !isConnected}
+                disabled={connectionMode !== 'streaming' && connectionMode !== 'noaudio' && !isConnected}
                 className="bg-violet-600 hover:bg-violet-700 disabled:bg-gray-800/50 p-3 rounded-lg text-white disabled:text-gray-600 transition-colors shadow-md"
               >
                 <Send className="w-4 h-4" />
@@ -1437,7 +1454,19 @@ export default function App() {
             
             {/* Controls row */}
             <div className="flex items-center gap-3 mt-2">
-              {/* Model Selector */}
+              {/* Mode selector - always first */}
+              <select 
+                value={connectionMode}
+                onChange={(e) => setConnectionMode(e.target.value as 'webrtc' | 'streaming' | 'noaudio')}
+                disabled={isConnected}
+                className="text-[10px] px-2 py-1 rounded border bg-gray-800/50 border-gray-700 text-gray-400 cursor-pointer disabled:opacity-50 focus:outline-none focus:border-violet-500"
+              >
+                <option value="webrtc">🎙️ Realtime</option>
+                <option value="streaming">💬 Streaming</option>
+                <option value="noaudio">⌨️ Text Only</option>
+              </select>
+              
+              {/* Model Selector - shown in streaming mode */}
               {connectionMode === 'streaming' && (
                 <div className="relative" ref={modelSelectorRef}>
                   <button
@@ -1575,18 +1604,6 @@ export default function App() {
                   )}
                 </div>
               )}
-              
-              {/* Mode selector */}
-              <select 
-                value={connectionMode}
-                onChange={(e) => setConnectionMode(e.target.value as 'webrtc' | 'streaming' | 'noaudio')}
-                disabled={isConnected}
-                className="text-[10px] px-2 py-1 rounded border bg-gray-800/50 border-gray-700 text-gray-400 cursor-pointer disabled:opacity-50 focus:outline-none focus:border-violet-500"
-              >
-                <option value="webrtc">🎙️ Realtime</option>
-                <option value="streaming">💬 Streaming</option>
-                <option value="noaudio">⌨️ Text Only</option>
-              </select>
               
               {/* Status indicator */}
               <span className={`text-[10px] px-2 py-0.5 rounded-full ${

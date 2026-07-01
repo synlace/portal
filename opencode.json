@@ -12,7 +12,20 @@
       }
     }
   },
-
+  "agents": {
+    "quick": {
+      "max_steps": 3,
+      "instructions": "You are a fast task executor. Run commands directly using execute_command. Don't create files, scripts, or logs unless explicitly asked. Just run the command and report the output."
+    },
+    "standard": {
+      "max_steps": 8,
+      "instructions": "You are a software engineering agent. Read relevant code first using read_file, then implement changes. Verify your work with tests when possible."
+    },
+    "thorough": {
+      "max_steps": 12,
+      "instructions": "You are a thorough software engineering agent. Read all relevant code, implement changes carefully, run tests, check for edge cases, and provide a detailed summary of what was done."
+    }
+  },
   "$schema": "https://opencode.ai/config.json",
   "instructions": [
     ".opencode/instructions/custom-rules.md"
