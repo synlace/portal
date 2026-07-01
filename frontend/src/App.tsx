@@ -199,6 +199,11 @@ export default function App() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
+  // Model selection for streaming mode
+  const [selectedModel, setSelectedModel] = useState('gpt-4o-mini');
+  const [availableModels, setAvailableModels] = useState<Array<{id: string, name: string, provider: string}>>([]);
+  const [showModelSelector, setShowModelSelector] = useState(false);
+
   // Refs for SDK session and audio
   const sessionRef = useRef<RealtimeSession | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
@@ -277,6 +282,22 @@ export default function App() {
     fetchJobs();
     const interval = setInterval(fetchJobs, 3000);
     return () => clearInterval(interval);
+  }, []);
+
+  // Fetch available models
+  useEffect(() => {
+    const fetchModels = async () => {
+      try {
+        const res = await fetch('/api/models');
+        if (res.ok) {
+          const data = await res.json();
+          setAvailableModels(data.models);
+        }
+      } catch (err) {
+        console.error('Failed to fetch models:', err);
+      }
+    };
+    fetchModels();
   }, []);
 
   // Spacebar push-to-talk in streaming mode
@@ -795,10 +816,18 @@ export default function App() {
     let hasToolCalls = false;
     
     try {
+      // Determine base URL for OpenRouter models
+      const isOpenRouter = selectedModel.includes('/');
+      const baseUrl = isOpenRouter ? 'https://openrouter.ai/api/v1' : undefined;
+      
       const response = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: apiMessages })
+        body: JSON.stringify({ 
+          messages: apiMessages,
+          model: selectedModel,
+          base_url: baseUrl
+        })
       });
       
       const reader = response.body?.getReader();
@@ -1425,23 +1454,59 @@ export default function App() {
           </div>
 
           {/* Text Chat Input */}
-          <div className="p-4 border-t border-gray-800 bg-gray-950 flex gap-3 items-center">
-            <input 
-              type="text" 
-              placeholder={isConnected ? "Type a message and press enter..." : "Connect to start chatting"} 
-              disabled={!isConnected}
-              value={textInput}
-              onChange={(e) => setTextInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && sendTextMessage()}
-              className="flex-1 bg-gray-900/80 border border-gray-800 focus:border-violet-500 text-white rounded px-4 py-3 focus:outline-none transition-colors text-sm font-sans"
-            />
-            <button 
-              onClick={sendTextMessage}
-              disabled={!isConnected}
-              className="bg-violet-600 hover:bg-violet-700 disabled:bg-gray-800/50 p-3 rounded-lg text-white disabled:text-gray-600 transition-colors shadow-md"
-            >
-              <Send className="w-4 h-4" />
-            </button>
+          <div className="p-4 border-t border-gray-800 bg-gray-950">
+            <div className="flex gap-3 items-center mb-2">
+              <input 
+                type="text" 
+                placeholder={isConnected ? "Type a message and press enter..." : "Connect to start chatting"} 
+                disabled={!isConnected}
+                value={textInput}
+                onChange={(e) => setTextInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && sendTextMessage()}
+                className="flex-1 bg-gray-900/80 border border-gray-800 focus:border-violet-500 text-white rounded px-4 py-3 focus:outline-none transition-colors text-sm font-sans"
+              />
+              <button 
+                onClick={sendTextMessage}
+                disabled={!isConnected}
+                className="bg-violet-600 hover:bg-violet-700 disabled:bg-gray-800/50 p-3 rounded-lg text-white disabled:text-gray-600 transition-colors shadow-md"
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
+            
+            {/* Model Selector */}
+            {connectionMode === 'streaming' && (
+              <div className="relative">
+                <button
+                  onClick={() => setShowModelSelector(!showModelSelector)}
+                  className="text-[10px] px-2 py-1 rounded border bg-gray-800/50 border-gray-700 text-gray-400 hover:text-gray-300 hover:border-gray-600 transition-colors flex items-center gap-1.5"
+                >
+                  <Cpu className="w-3 h-3" />
+                  {availableModels.find(m => m.id === selectedModel)?.name || selectedModel}
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+                
+                {showModelSelector && (
+                  <div className="absolute bottom-full left-0 mb-1 bg-gray-900 border border-gray-700 rounded-lg shadow-xl py-1 z-50 min-w-[200px]">
+                    {availableModels.map((model) => (
+                      <button
+                        key={model.id}
+                        onClick={() => {
+                          setSelectedModel(model.id);
+                          setShowModelSelector(false);
+                        }}
+                        className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 flex items-center justify-between ${
+                          selectedModel === model.id ? 'text-violet-400 bg-gray-800/50' : 'text-gray-300'
+                        }`}
+                      >
+                        <span>{model.name}</span>
+                        <span className="text-[9px] text-gray-500">{model.provider}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </section>
 
