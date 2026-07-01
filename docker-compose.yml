@@ -1,0 +1,22 @@
+services:
+  portal:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    sysctls:
+      - net.ipv4.conf.all.src_valid_mark=1
+    volumes:
+      - .:/workspace # Mount the portal repository itself by default, or change to any local project path
+      # Uncomment to mount a local WireGuard config file directly:
+      # - ./wg0.conf:/etc/wireguard/wg0.conf:ro
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - WG_CONFIG=${WG_CONFIG} # Pass raw WireGuard config as an env var string
+      - PORT=8000
+    restart: unless-stopped
