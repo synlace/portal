@@ -10,6 +10,9 @@ Call your AI assistant.
 
 ## Quickstart
 
+### Environment Variables
+- **`MODEL_NAME`**: Specify the AI model for background tasks (defaults to the standard model).
+
 ### Option 1: Direct Docker Run
 Build and start the portal container while mounting your current directory into the `/workspace` mount:
 ```bash
@@ -61,6 +64,9 @@ These tools spawn background agents that run independently:
 
 ## Architecture & Technology Decisions
 
+### Logging Executed Commands
+The system now logs raw shell commands executed via `execute_command`. This helps users track operations performed in the background agents.
+
 ### 1. Unified WebRTC Integration (REST + SDP)
 To provide the lowest possible audio latency and eliminate complex WebSocket framing/re-sampling in Python, portal uses a unified WebRTC connection model:
 - The client (browser) captures local audio via `getUserMedia` and generates a local SDP offer.
@@ -93,7 +99,14 @@ Portal supports two distinct execution models:
 - Best for complex/long-running tasks: refactoring modules, writing tests, multi-file changes
 - Progress and results visible in the Background Agents sidebar
 
-## Terminology
+### Model Selection
+To specify a model for background tasks, set the `MODEL_NAME` environment variable in your `.env` file or in tools.json at the appropriate place:
+```bash
+echo "MODEL_NAME="your_desired_model_name"" >> .env
+```
+
+## Command Logging
+To enable raw command logging, modify the `log_commands` flag in your configuration. This will log all shell commands executed through `execute_command`.
 
 | Term | Definition |
 |------|------------|

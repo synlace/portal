@@ -163,7 +163,7 @@
   {
     "type": "function",
     "name": "spawn_agent",
-    "description": "Delegate a complex, multi-step coding task to a background agent that runs independently. Returns a unique job ID.",
+    "description": "Delegate a complex, multi-step coding task to a background agent that runs independently. Returns a unique job ID. This task can specify a model via configuration.",
     "parameters": {
       "type": "object",
       "properties": {
