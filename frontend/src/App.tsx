@@ -1434,7 +1434,7 @@ export default function App() {
               {/* Text input */}
               <input 
                 type="text" 
-                placeholder={isConnected ? "Type a message and press enter..." : (connectionMode === 'noaudio' ? "Type a message and press enter..." : "Press mic to connect, then type...")} 
+                placeholder={isConnected ? "Type a message and press enter..." : (connectionMode === 'noaudio' ? "Type a message and press enter..." : "Press play to connect, then type...")} 
                 disabled={connectionMode !== 'streaming' && connectionMode !== 'noaudio' && !isConnected}
                 value={textInput}
                 onChange={(e) => setTextInput(e.target.value)}
