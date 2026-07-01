@@ -1423,7 +1423,7 @@ export default function App() {
             <section className="w-[340px] border-r border-gray-800/80 bg-gray-950/35 flex flex-col shrink-0 overflow-hidden">
               {/* Graph Header */}
               <div className="px-5 py-3 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between shrink-0">
-                <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
                   📊 Concept Graph
                 </span>
                 <button
@@ -1451,7 +1451,7 @@ export default function App() {
 
               {/* Specs Divider */}
               <div className="px-5 py-3 border-b border-t border-gray-800/50 bg-gray-900/20 flex items-center justify-between shrink-0">
-                <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+                <span className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
                   📄 {activeConcept ? conceptGraph?.concepts.find(c => c.id === activeConcept)?.label || 'Concept' : 'All Specs'}
                 </span>
                 <span className="text-[9px] text-gray-600">
@@ -1513,7 +1513,7 @@ export default function App() {
                         <button
                           key={specName}
                           onClick={() => setActiveSpec(specName)}
-                          className={`px-5 py-3 text-[10px] font-bold uppercase tracking-wider border-b-2 transition-colors whitespace-nowrap font-mono ${
+                          className={`px-5 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors whitespace-nowrap font-mono ${
                             activeSpec === specName
                               ? 'text-violet-300 border-violet-500 bg-violet-950/10'
                               : 'text-gray-500 border-transparent hover:text-gray-300'
@@ -1581,7 +1581,7 @@ export default function App() {
                 /* ─── NORMAL CONVERSATION VIEW ──────────────────────────────── */
                 <>
                   <div className="px-5 py-3 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between shrink-0">
-                    <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">Conversation</span>
+                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Conversation</span>
                     <span className="text-xs text-violet-400 font-semibold">{messages.length} messages</span>
                   </div>
 
@@ -1832,7 +1832,7 @@ export default function App() {
               <div className="px-5 py-3 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2">
                   <Cpu className="w-4 h-4 text-indigo-400 animate-pulse" />
-                  <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">Agents</span>
+                  <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Agents</span>
                 </div>
                 <div className="flex items-center gap-2">
                   {activeJobs.length > 0 && (

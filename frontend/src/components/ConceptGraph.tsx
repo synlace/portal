@@ -233,9 +233,10 @@ function ConceptGraphInner({ graph, activeNode, onNodeClick, isFullscreen }: Con
   }, [layoutedNodes, graph, activeNode]);
 
   const [nodes, setNodes, onNodesChange] = useNodesState(enrichedNodes);
-  const [edges, , onEdgesChange] = useEdgesState(layoutedEdges);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges);
 
   useEffect(() => { setNodes(enrichedNodes); }, [enrichedNodes, setNodes]);
+  useEffect(() => { setEdges(layoutedEdges); }, [layoutedEdges, setEdges]);
 
   useEffect(() => {
     if (isFullscreen) {
@@ -287,7 +288,9 @@ function ConceptGraphInner({ graph, activeNode, onNodeClick, isFullscreen }: Con
         <MiniMap
           nodeColor={minimapNodeColor}
           maskColor="rgba(3, 7, 18, 0.8)"
-          style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 8 }}
+          style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 8, width: 120, height: 80 }}
+          pannable={false}
+          zoomable={false}
         />
       </ReactFlow>
     </div>
