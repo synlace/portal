@@ -16,10 +16,15 @@ import '@xyflow/react/dist/style.css';
 import dagre from '@dagrejs/dagre';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
-interface ConceptNode {
+export type ConceptNodeType = 'service' | 'infrastructure' | 'cross-cutting';
+
+export interface ConceptNode {
   id: string;
   label: string;
   parent: string | null;
+  type?: ConceptNodeType;
+  appliesTo?: string[];
+  connectedTo?: string[];
 }
 
 interface ConceptRelationship {
@@ -43,87 +48,149 @@ interface ConceptGraphProps {
 
 // ─── Dagre layout helper ────────────────────────────────────────────────────
 function getLayoutedElements(concepts: ConceptNode[], relationships: ConceptRelationship[]) {
+  const mainNodes = concepts.filter(c => c.type !== 'cross-cutting');
+  const crossCutting = concepts.filter(c => c.type === 'cross-cutting');
+
   const g = new dagre.graphlib.Graph();
   g.setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: 'TB', nodesep: 60, ranksep: 80, marginx: 20, marginy: 20 });
+  g.setGraph({ rankdir: 'TB', nodesep: 50, ranksep: 70, marginx: 30, marginy: 30 });
 
-  const parentEdges = concepts
-    .filter(c => c.parent)
-    .map(c => ({ source: c.parent!, target: c.id }));
-
-  concepts.forEach(c => {
-    g.setNode(c.id, { width: 140, height: 50 });
+  // Add main nodes
+  mainNodes.forEach(c => {
+    const w = c.type === 'infrastructure' ? 110 : 130;
+    const h = c.type === 'infrastructure' ? 38 : 44;
+    g.setNode(c.id, { width: w, height: h });
   });
 
-  parentEdges.forEach(e => {
-    g.setEdge(e.source, e.target);
+  // Add cross-cutting nodes (smaller, positioned later)
+  crossCutting.forEach(c => {
+    g.setNode(c.id, { width: 90, height: 32 });
+  });
+
+  // Layout edges: relationships + infrastructure connections
+  relationships.forEach(r => g.setEdge(r.from, r.to));
+  concepts.filter(c => c.type === 'infrastructure' && c.connectedTo).forEach(c => {
+    c.connectedTo!.forEach(svc => g.setEdge(svc, c.id));
+  });
+
+  // Layout cross-cutting edges
+  crossCutting.forEach(cc => {
+    (cc.appliesTo || []).forEach(target => {
+      if (g.node(target)) g.setEdge(cc.id, target);
+    });
   });
 
   dagre.layout(g);
 
+  // Find the rightmost x of main nodes to position cross-cutting to the side
+  const mainRightX = mainNodes.length > 0
+    ? Math.max(...mainNodes.map(c => (g.node(c.id)?.x || 0) + 65))
+    : 400;
+
   const nodes: Node[] = concepts.map(c => {
     const pos = g.node(c.id);
+    if (c.type === 'cross-cutting') {
+      const idx = crossCutting.indexOf(c);
+      return {
+        id: c.id,
+        position: { x: mainRightX + 40, y: 40 + idx * 55 },
+        data: { label: c.label, nodeType: c.type },
+        type: 'crossCuttingNode',
+      };
+    }
     return {
       id: c.id,
-      position: { x: pos.x - 70, y: pos.y - 25 },
-      data: { label: c.label, isRoot: !c.parent },
-      type: 'conceptNode',
+      position: { x: pos.x - (c.type === 'infrastructure' ? 55 : 65), y: pos.y - (c.type === 'infrastructure' ? 19 : 22) },
+      data: { label: c.label, nodeType: c.type },
+      type: c.type === 'infrastructure' ? 'infraNode' : 'serviceNode',
     };
   });
 
+  // Build edges
   const edgeSet = new Set<string>();
   const edges: Edge[] = [];
 
-  const addEdge = (from: string, to: string, label: string, dashed: boolean) => {
+  const addEdge = (from: string, to: string, label: string, style: Record<string, unknown> = {}) => {
     const key = `${from}->${to}`;
     if (edgeSet.has(key)) return;
     edgeSet.add(key);
-    edges.push({
-      id: key,
-      source: from,
-      target: to,
-      label,
-      animated: false,
-      style: { stroke: dashed ? '#374151' : '#4b5563', strokeWidth: dashed ? 1 : 1.5, strokeDasharray: dashed ? '5,5' : undefined },
-      type: 'smoothstep',
-    });
+    edges.push({ id: key, source: from, target: to, label, style, type: 'smoothstep' });
   };
 
-  if (relationships.length > 0) {
-    relationships.forEach(r => addEdge(r.from, r.to, r.label, false));
-  }
-  parentEdges.forEach(e => addEdge(e.source, e.target, '', true));
+  relationships.forEach(r => addEdge(r.from, r.to, r.label));
+
+  // Infrastructure connections (dashed amber)
+  concepts.filter(c => c.type === 'infrastructure' && c.connectedTo).forEach(c => {
+    c.connectedTo!.forEach(svc => addEdge(svc, c.id, '', { stroke: '#92400e', strokeWidth: 1, strokeDasharray: '4,4' }));
+  });
+
+  // Cross-cutting connections (dashed violet)
+  crossCutting.forEach(cc => {
+    (cc.appliesTo || []).forEach(target => addEdge(cc.id, target, '', { stroke: '#7c3aed', strokeWidth: 1, strokeDasharray: '3,3' }));
+  });
 
   return { nodes, edges };
 }
 
-// ─── Custom Node Component ──────────────────────────────────────────────────
-interface ConceptNodeData {
+// ─── Custom Node Components ─────────────────────────────────────────────────
+interface NodeData {
   label: string;
-  isRoot: boolean;
+  nodeType: ConceptNodeType;
   specCount?: number;
   isActive?: boolean;
   [key: string]: unknown;
 }
 
-function ConceptNodeComponent({ data }: { data: ConceptNodeData; selected?: boolean }) {
-  const isRoot = data.isRoot;
-  const isActive = data.isActive;
+function ServiceNode({ data }: { data: NodeData }) {
   return (
-    <div
-      className={`
-        px-4 py-2 rounded-lg text-center font-mono text-xs font-bold transition-all cursor-pointer select-none
-        ${isRoot
-          ? 'bg-violet-950/80 border-2 border-violet-500 text-violet-200 shadow-lg shadow-violet-500/10'
-          : isActive
-            ? 'bg-gray-800 border border-violet-500 text-violet-300 shadow-md shadow-violet-500/10'
-            : 'bg-gray-900 border border-gray-700 text-gray-300 hover:border-gray-500 hover:bg-gray-800'
-        }
-      `}
-    >
+    <div className={`
+      px-3 py-2 rounded-lg text-center font-mono text-xs font-bold transition-all cursor-pointer select-none
+      ${data.isActive
+        ? 'bg-gray-800 border border-violet-500 text-violet-300 shadow-md shadow-violet-500/10'
+        : 'bg-gray-900 border border-gray-700 text-gray-300 hover:border-gray-500 hover:bg-gray-800'
+      }
+    `}>
       {data.label}
       {data.specCount != null && data.specCount > 0 && (
-        <div className="text-[8px] text-gray-500 mt-0.5 font-normal">
+        <div className="text-[7px] text-gray-500 mt-0.5 font-normal">
+          {data.specCount} spec{data.specCount > 1 ? 's' : ''}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function InfraNode({ data }: { data: NodeData }) {
+  return (
+    <div className={`
+      px-3 py-1.5 rounded-lg text-center font-mono text-[10px] font-bold transition-all cursor-pointer select-none
+      ${data.isActive
+        ? 'bg-amber-950/70 border border-amber-600 text-amber-200 shadow-md shadow-amber-500/10'
+        : 'bg-amber-950/50 border border-amber-800/60 text-amber-300 hover:border-amber-600'
+      }
+    `}>
+      {data.label}
+      {data.specCount != null && data.specCount > 0 && (
+        <div className="text-[7px] text-amber-500/60 mt-0.5 font-normal">
+          {data.specCount} spec{data.specCount > 1 ? 's' : ''}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CrossCuttingNode({ data }: { data: NodeData }) {
+  return (
+    <div className={`
+      px-3 py-1.5 rounded text-center font-mono text-[10px] font-bold transition-all cursor-pointer select-none
+      ${data.isActive
+        ? 'bg-violet-950/70 border border-violet-500 border-dashed text-violet-200 shadow-md shadow-violet-500/10'
+        : 'bg-violet-950/50 border border-violet-700/60 border-dashed text-violet-300 hover:border-violet-500'
+      }
+    `}>
+      ◇ {data.label}
+      {data.specCount != null && data.specCount > 0 && (
+        <div className="text-[7px] text-violet-400/60 mt-0.5 font-normal">
           {data.specCount} spec{data.specCount > 1 ? 's' : ''}
         </div>
       )}
@@ -133,8 +200,17 @@ function ConceptNodeComponent({ data }: { data: ConceptNodeData; selected?: bool
 
 // ─── Node Types Registration ────────────────────────────────────────────────
 const nodeTypes: NodeTypes = {
-  conceptNode: ConceptNodeComponent,
+  serviceNode: ServiceNode,
+  infraNode: InfraNode,
+  crossCuttingNode: CrossCuttingNode,
 };
+
+// ─── MiniMap node color helper ──────────────────────────────────────────────
+function minimapNodeColor(node: Node) {
+  if (node.type === 'infraNode') return '#92400e';
+  if (node.type === 'crossCuttingNode') return '#6d28d9';
+  return '#374151';
+}
 
 // ─── Inner Component (needs ReactFlowProvider context) ──────────────────────
 function ConceptGraphInner({ graph, activeNode, onNodeClick, isFullscreen }: ConceptGraphProps) {
@@ -145,7 +221,6 @@ function ConceptGraphInner({ graph, activeNode, onNodeClick, isFullscreen }: Con
     return getLayoutedElements(graph.concepts, graph.relationships);
   }, [graph]);
 
-  // Inject spec counts and active state into node data
   const enrichedNodes = useMemo(() => {
     return layoutedNodes.map(n => ({
       ...n,
@@ -160,12 +235,8 @@ function ConceptGraphInner({ graph, activeNode, onNodeClick, isFullscreen }: Con
   const [nodes, setNodes, onNodesChange] = useNodesState(enrichedNodes);
   const [edges, , onEdgesChange] = useEdgesState(layoutedEdges);
 
-  // Sync nodes when enrichedNodes change
-  useEffect(() => {
-    setNodes(enrichedNodes);
-  }, [enrichedNodes, setNodes]);
+  useEffect(() => { setNodes(enrichedNodes); }, [enrichedNodes, setNodes]);
 
-  // Fit view when entering fullscreen
   useEffect(() => {
     if (isFullscreen) {
       const timer = setTimeout(() => fitView({ padding: 0.3, duration: 300 }), 50);
@@ -214,7 +285,7 @@ function ConceptGraphInner({ graph, activeNode, onNodeClick, isFullscreen }: Con
         <Background color="#1f2937" gap={20} size={1} />
         <Controls showInteractive={false} />
         <MiniMap
-          nodeColor="#374151"
+          nodeColor={minimapNodeColor}
           maskColor="rgba(3, 7, 18, 0.8)"
           style={{ background: '#111827', border: '1px solid #1f2937', borderRadius: 8 }}
         />
