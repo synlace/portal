@@ -66,7 +66,18 @@ interface GroupedMessage {
 }
 
 const groupMessages = (messages: Message[]): GroupedMessage[] => {
-  const sorted = [...messages].sort((a, b) => {
+  // Deduplicate model messages with identical text (keep only the first occurrence)
+  const seen = new Set<string>();
+  const deduped = messages.filter(m => {
+    if (m.role === 'model' && m.text) {
+      const key = `model:${m.text}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+    }
+    return true;
+  });
+
+  const sorted = [...deduped].sort((a, b) => {
     const tA = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime();
     const tB = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime();
     if (Math.abs(tA - tB) < 1000) {
@@ -110,7 +121,14 @@ const groupMessages = (messages: Message[]): GroupedMessage[] => {
         }
       }
 
-      const combinedText = modelGroup.map(m => m.text || '').join(' ');
+      // Deduplicate: only include messages whose text isn't already a substring of accumulated text
+      let combinedText = '';
+      for (const m of modelGroup) {
+        const text = m.text || '';
+        if (text && !combinedText.includes(text)) {
+          combinedText += (combinedText ? ' ' : '') + text;
+        }
+      }
       grouped.push({ type: 'model', messages: modelGroup, combinedText });
       continue;
     }
@@ -175,6 +193,12 @@ export default function App() {
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
 
+  // Connection mode
+  const [connectionMode, setConnectionMode] = useState<'webrtc' | 'streaming'>('webrtc');
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+
   // Refs for SDK session and audio
   const sessionRef = useRef<RealtimeSession | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
@@ -183,6 +207,11 @@ export default function App() {
   const userSpeechStopTimestampRef = useRef<number>(0);
   const micDrainTimeoutRef = useRef<any>(null);
   const userSpeakingRef = useRef<boolean>(false);
+
+  // Refs for tool call tracking and text buffering
+  const pendingToolCallsRef = useRef(0);
+  const bufferedTextRef = useRef<{ id: string; text: string } | null>(null);
+  const flushTimeoutRef = useRef<any>(null);
 
   // Separate mute suppression driven purely by server events, decoupled from isModelTalking visual state
   const micSuppressedRef = useRef<boolean>(false);
@@ -250,11 +279,33 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Cancel a running job
+  const cancelJob = async (jobId: string) => {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+      if (res.ok) {
+        // Refresh jobs list immediately
+        const jobsRes = await fetch('/api/jobs');
+        if (jobsRes.ok) {
+          setJobs(await jobsRes.json());
+        }
+      }
+    } catch (err) {
+      console.error('Failed to cancel job:', err);
+    }
+  };
+
   // ─── Connect via @openai/agents RealtimeSession ────────────────────────────────
   const startSession = async () => {
     if (isConnecting || isConnected) return;
     setIsConnecting(true);
     setErrorMsg('');
+
+    // Branch on connection mode
+    if (connectionMode === 'streaming') {
+      await startStreamingSession();
+      return;
+    }
 
     try {
       const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
@@ -447,11 +498,31 @@ export default function App() {
           }
           const itemId = event.item_id;
           const text = event.delta;
+
+          // If tool calls are in progress, buffer the text instead of adding to messages
+          if (pendingToolCallsRef.current > 0) {
+            const existing = bufferedTextRef.current;
+            if (existing && existing.id === itemId) {
+              // Append to existing buffer for same message
+              bufferedTextRef.current = { id: itemId, text: existing.text + text };
+            } else {
+              // New message or different item_id - replace buffer
+              bufferedTextRef.current = { id: itemId, text };
+            }
+            return;
+          }
+
+          // No tool calls in progress - add normally
           setMessages(prev => {
             const existingIdx = prev.findIndex(m => m.id === itemId);
             if (existingIdx !== -1) {
+              const existingText = prev[existingIdx].text || '';
+              // Prevent duplicate deltas - only append if delta is not already at the end
+              if (existingText.endsWith(text)) {
+                return prev;
+              }
               const updated = [...prev];
-              updated[existingIdx] = { ...updated[existingIdx], text: (updated[existingIdx].text || '') + text };
+              updated[existingIdx] = { ...updated[existingIdx], text: existingText + text };
               return updated;
             }
             return [...prev, { role: 'model', text, id: itemId, timestamp: new Date() }];
@@ -541,6 +612,12 @@ export default function App() {
   };
 
   const stopSession = () => {
+    // Handle streaming mode
+    if (connectionMode === 'streaming') {
+      stopStreamingSession();
+      return;
+    }
+    
     setIsConnected(false);
     setIsConnecting(false);
     setIsModelTalking(false);
@@ -568,9 +645,247 @@ export default function App() {
     }
   };
 
+  // ─── Streaming Mode Functions ──────────────────────────────────────────────
+
+  const startStreamingSession = async () => {
+    try {
+      // Verify API key works by calling token endpoint
+      const tokenUrl = `/api/session/token?apiKey=${encodeURIComponent(apiKey)}`;
+      const tokenRes = await fetch(tokenUrl, { method: 'POST' });
+      if (!tokenRes.ok) {
+        throw new Error('Invalid API key');
+      }
+      
+      setIsConnected(true);
+      setIsConnecting(false);
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg(err.message || 'Error starting streaming session');
+      setIsConnecting(false);
+    }
+  };
+
+  const stopStreamingSession = () => {
+    setIsConnected(false);
+    setIsRecording(false);
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+      mediaRecorderRef.current = null;
+    }
+    audioChunksRef.current = [];
+  };
+
+  const toggleRecording = async () => {
+    if (isRecording) {
+      // Stop recording
+      mediaRecorderRef.current?.stop();
+      setIsRecording(false);
+    } else {
+      // Start recording
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          audio: { echoCancellation: true, noiseSuppression: true } 
+        });
+        
+        const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm;codecs=opus' });
+        mediaRecorderRef.current = mediaRecorder;
+        audioChunksRef.current = [];
+        
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            audioChunksRef.current.push(event.data);
+          }
+        };
+        
+        mediaRecorder.onstop = async () => {
+          const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+          stream.getTracks().forEach(track => track.stop());
+          
+          // Send to STT endpoint
+          const formData = new FormData();
+          formData.append('audio', audioBlob, 'recording.webm');
+          
+          try {
+            const response = await fetch('/api/stt', { method: 'POST', body: formData });
+            const data = await response.json();
+            
+            if (data.text) {
+              // Send transcribed text as message
+              await sendStreamingMessage(data.text);
+            }
+          } catch (err) {
+            console.error('STT failed:', err);
+            setErrorMsg('Transcription failed');
+          }
+        };
+        
+        mediaRecorder.start();
+        setIsRecording(true);
+      } catch (err) {
+        console.error('Microphone access denied:', err);
+        setErrorMsg('Microphone access denied');
+      }
+    }
+  };
+
+  const sendStreamingMessage = async (text: string) => {
+    // Add user message
+    const userMsg: Message = {
+      role: 'user',
+      text,
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, userMsg]);
+    setTextInput('');
+    
+    // Build messages array for API
+    const apiMessages = messages
+      .filter(m => m.role === 'user' || m.role === 'model')
+      .map(m => ({
+        role: m.role === 'model' ? 'assistant' : 'user',
+        content: m.text || ''
+      }));
+    apiMessages.push({ role: 'user', content: text });
+    
+    // Create assistant message placeholder
+    const assistantMsgId = crypto.randomUUID();
+    const assistantMsg: Message = {
+      role: 'model',
+      text: '',
+      id: assistantMsgId,
+      timestamp: new Date()
+    };
+    setMessages(prev => [...prev, assistantMsg]);
+    
+    try {
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: apiMessages })
+      });
+      
+      const reader = response.body?.getReader();
+      if (!reader) throw new Error('No reader');
+      
+      const decoder = new TextDecoder();
+      
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        
+        const chunk = decoder.decode(value);
+        const lines = chunk.split('\n');
+        
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') break;
+            
+            try {
+              const event = JSON.parse(data);
+              
+              if (event.type === 'text_delta') {
+                setMessages(prev => prev.map(m => 
+                  m.id === assistantMsgId 
+                    ? { ...m, text: (m.text || '') + event.content }
+                    : m
+                ));
+              } else if (event.type === 'tool_call') {
+                const toolMsg: Message = {
+                  role: 'tool',
+                  toolName: event.name,
+                  toolArgs: event.arguments,
+                  toolStatus: 'executing',
+                  timestamp: new Date()
+                };
+                setMessages(prev => [...prev, toolMsg]);
+              } else if (event.type === 'tool_result') {
+                setMessages(prev => {
+                  // Find the last tool message that's still executing
+                  let lastToolIdx = -1;
+                  for (let i = prev.length - 1; i >= 0; i--) {
+                    if (prev[i].role === 'tool' && prev[i].toolName && prev[i].toolStatus === 'executing') {
+                      lastToolIdx = i;
+                      break;
+                    }
+                  }
+                  if (lastToolIdx !== -1) {
+                    const updated = [...prev];
+                    updated[lastToolIdx] = {
+                      ...updated[lastToolIdx],
+                      toolStatus: 'completed',
+                      toolResult: JSON.stringify(event.result)
+                    };
+                    return updated;
+                  }
+                  return prev;
+                });
+              } else if (event.type === 'error') {
+                setErrorMsg(event.message);
+              }
+            } catch {}
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Streaming failed:', err);
+      setErrorMsg('Streaming failed');
+    }
+  };
+
+  const flushBufferedText = () => {
+    if (bufferedTextRef.current) {
+      const { id, text } = bufferedTextRef.current;
+      setMessages(prev => {
+        // Don't add if already exists
+        if (prev.some(m => m.id === id)) return prev;
+        return [...prev, { role: 'model', text, id, timestamp: new Date() }];
+      });
+      bufferedTextRef.current = null;
+    }
+  };
+
   const handleToolUpdate = (msg: any) => {
     const { name, args, status, result } = msg;
     logger(`handleToolUpdate: ${name} status=${status}`);
+
+    // Track pending tool calls
+    if (status === 'executing') {
+      // First tool call in a sequence - remove any recent model messages (initial acknowledgments)
+      if (pendingToolCallsRef.current === 0) {
+        setMessages(prev => {
+          // Find and remove model messages added in the last 2 seconds
+          const now = Date.now();
+          const cutoff = now - 2000;
+          return prev.filter(m => {
+            if (m.role === 'model') {
+              const msgTime = m.timestamp instanceof Date ? m.timestamp.getTime() : new Date(m.timestamp).getTime();
+              if (msgTime > cutoff) {
+                logger(`Removing early model message: "${m.text?.substring(0, 50)}..."`);
+                return false;
+              }
+            }
+            return true;
+          });
+        });
+      }
+      pendingToolCallsRef.current++;
+      // Clear any pending flush timeout
+      if (flushTimeoutRef.current) {
+        clearTimeout(flushTimeoutRef.current);
+        flushTimeoutRef.current = null;
+      }
+    } else if (status === 'completed' || status === 'failed') {
+      pendingToolCallsRef.current = Math.max(0, pendingToolCallsRef.current - 1);
+      // If all tool calls are done, flush buffered text after a short delay
+      // (to catch any final text deltas that arrive right after tool completion)
+      if (pendingToolCallsRef.current === 0) {
+        flushTimeoutRef.current = setTimeout(() => {
+          flushBufferedText();
+          flushTimeoutRef.current = null;
+        }, 100);
+      }
+    }
 
     setMessages(prev => {
       const existingIdx = prev.findIndex(m =>
@@ -595,9 +910,18 @@ export default function App() {
     });
   };
 
-  const sendTextMessage = () => {
-    if (!textInput.trim() || !sessionRef.current) return;
-
+  const sendTextMessage = async () => {
+    if (!textInput.trim()) return;
+    
+    // Streaming mode
+    if (connectionMode === 'streaming') {
+      if (!isConnected) return;
+      await sendStreamingMessage(textInput);
+      return;
+    }
+    
+    // WebRTC mode
+    if (!sessionRef.current) return;
     sessionRef.current.sendMessage(textInput);
 
     setMessages(prev => [...prev, { role: 'user', text: textInput, timestamp: new Date() }]);
@@ -631,7 +955,57 @@ export default function App() {
     if (toolName === 'create_directory') return '📁';
     if (toolName === 'delete_file') return '🗑️';
     if (toolName === 'move_file') return '📦';
+    if (toolName === 'get_agent_status') return '📋';
+    if (toolName === 'list_agents') return '📋';
     return '🔧';
+  };
+
+  const parseAgentResult = (toolName: string, result: string) => {
+    try {
+      const data = JSON.parse(result);
+      if (toolName === 'spawn_agent' && data.job_id) {
+        return {
+          type: 'spawn' as const,
+          jobId: data.job_id,
+          mode: data.mode || 'standard',
+          message: data.message || '',
+        };
+      }
+      if (toolName === 'get_agent_status' && data.job_id) {
+        const startLog = data.logs?.find((l: any) => l.type === 'start');
+        const summaryLog = data.logs?.find((l: any) => l.type === 'summary');
+        return {
+          type: 'status' as const,
+          jobId: data.job_id,
+          status: data.status,
+          model: startLog?.model || 'unknown',
+          mode: data.mode || startLog?.mode || 'standard',
+          result: summaryLog?.text || data.result || '',
+        };
+      }
+      if (toolName === 'list_agents' && data.summary) {
+        return {
+          type: 'list' as const,
+          active: (data.active || []).map((j: any) => ({
+            jobId: j.job_id,
+            mode: j.mode || 'standard',
+            description: j.description || '',
+          })),
+          completed: (data.completed || []).map((j: any) => ({
+            jobId: j.job_id,
+            mode: j.mode || 'standard',
+            description: j.description || '',
+          })),
+          failed: (data.failed || []).map((j: any) => ({
+            jobId: j.job_id,
+            mode: j.mode || 'standard',
+            description: j.description || '',
+          })),
+          summary: data.summary,
+        };
+      }
+    } catch {}
+    return null;
   };
 
   return (
@@ -644,9 +1018,15 @@ export default function App() {
             portal
           </h1>
           <span className="text-xs text-gray-400 bg-gray-800 px-2.5 py-0.5 rounded-md">v1.0.0-beta</span>
-          <span className="text-[10px] px-2.5 py-0.5 rounded border bg-violet-950/40 border-violet-800 text-violet-300">
-            🎙️ WebRTC Realtime
-          </span>
+          <select 
+            value={connectionMode}
+            onChange={(e) => setConnectionMode(e.target.value as 'webrtc' | 'streaming')}
+            disabled={isConnected}
+            className="text-[10px] px-2 py-1 rounded border bg-violet-950/40 border-violet-800 text-violet-300 cursor-pointer disabled:opacity-50 focus:outline-none focus:border-violet-500"
+          >
+            <option value="webrtc">🎙️ Realtime</option>
+            <option value="streaming">💬 Streaming</option>
+          </select>
         </div>
 
         <div className="flex items-center gap-3">
@@ -709,7 +1089,9 @@ export default function App() {
                   <span 
                     key={i} 
                     className={`w-2 rounded bg-gradient-to-t from-violet-600 to-indigo-400 ${
-                      (isModelTalking || isUserSpeaking) ? 'wave-bar h-24' : 'h-4 transition-all duration-300'
+                      connectionMode === 'webrtc'
+                        ? (isModelTalking || isUserSpeaking) ? 'wave-bar h-24' : 'h-4 transition-all duration-300'
+                        : isRecording ? 'wave-bar h-24' : 'h-4 transition-all duration-300'
                     }`}
                   ></span>
                 ))}
@@ -719,30 +1101,42 @@ export default function App() {
             <div className="text-center">
               <span className={`text-xs font-semibold px-3 py-1 rounded-full ${
                 isConnected 
-                  ? (isModelTalking ? 'bg-violet-950/50 text-violet-300 border border-violet-800/50' : 'bg-green-950/30 text-green-400 border border-green-800/30')
+                  ? (isModelTalking ? 'bg-violet-950/50 text-violet-300 border border-violet-800/50' 
+                    : isRecording ? 'bg-red-950/50 text-red-300 border border-red-800/50'
+                    : 'bg-green-950/30 text-green-400 border border-green-800/30')
                   : 'bg-gray-900 text-gray-500 border border-gray-800'
               }`}>
                 {isConnected 
-                  ? (isModelTalking ? 'Assistant Speaking' : 'Live & Listening')
+                  ? (isModelTalking ? 'Assistant Speaking' 
+                    : isRecording ? 'Recording...' 
+                    : connectionMode === 'webrtc' ? 'Live & Listening' : 'Ready')
                   : 'Offline'}
               </span>
             </div>
 
             <button 
-              onClick={() => setIsMuted(!isMuted)}
+              onClick={connectionMode === 'webrtc' ? () => setIsMuted(!isMuted) : toggleRecording}
               disabled={!isConnected}
               className={`p-4 rounded-full border transition-all ${
                 !isConnected 
                   ? 'bg-gray-900 text-gray-600 border-gray-800 cursor-not-allowed'
-                  : isMuted 
-                    ? 'bg-red-950/50 border-red-800/50 text-red-400 hover:bg-red-950/80 shadow-lg shadow-red-500/5'
-                    : 'bg-violet-950/30 border-violet-800/40 text-violet-400 hover:bg-violet-950/50 shadow-lg shadow-violet-500/5'
+                  : isRecording 
+                    ? 'bg-red-600 border-red-500 text-white animate-pulse shadow-lg shadow-red-500/20'
+                    : isMuted 
+                      ? 'bg-red-950/50 border-red-800/50 text-red-400 hover:bg-red-950/80 shadow-lg shadow-red-500/5'
+                      : 'bg-violet-950/30 border-violet-800/40 text-violet-400 hover:bg-violet-950/50 shadow-lg shadow-violet-500/5'
               }`}
             >
-              {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+              {isRecording ? <MicOff className="w-6 h-6" /> : isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
             </button>
             <p className="text-[10px] text-gray-500 text-center max-w-[200px]">
-              {isMuted ? "Microphone is muted" : "Your voice is streamed securely using WebRTC."}
+              {isRecording 
+                ? "Recording... click to stop" 
+                : isMuted 
+                  ? "Microphone is muted" 
+                  : connectionMode === 'webrtc' 
+                    ? "Your voice is streamed securely using WebRTC."
+                    : "Click to record voice message."}
             </p>
           </div>
 
@@ -789,6 +1183,98 @@ export default function App() {
                   try {
                     cmdOutput = JSON.parse(m.toolResult);
                   } catch {}
+                }
+                
+                // For agent tools, render flat card without parent wrapper
+                if (m.toolResult && (m.toolName === 'spawn_agent' || m.toolName === 'get_agent_status' || m.toolName === 'list_agents')) {
+                  const agentData = parseAgentResult(m.toolName, m.toolResult);
+                  const agentName = m.toolArgs?.description?.split(' ')[0] || agentData?.jobId?.slice(0, 8) || '';
+                  
+                  if (agentData?.type === 'spawn') {
+                    return (
+                      <div key={idx} className={`bg-gray-900 border border-gray-800/80 rounded p-3 text-xs font-mono max-w-3xl shadow-md ${
+                        'border-l-4 border-l-violet-500'
+                      }`}>
+                        <div className="flex items-center gap-2 text-[11px]">
+                          <span className="text-violet-400">🚀</span>
+                          <span className="text-gray-300 font-medium">{agentName}</span>
+                          <span className="text-gray-600">·</span>
+                          <span className="text-gray-500">{agentData.mode}</span>
+                          <span className="text-gray-600">·</span>
+                          <span className="text-violet-400/80">{isExec ? 'Running' : 'Spawned'}</span>
+                        </div>
+                        {humanReadableArgs && (
+                          <div className="text-gray-500 text-[10px] mt-1 line-clamp-1">
+                            {humanReadableArgs}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  }
+                  
+                  if (agentData?.type === 'list') {
+                    const { active, completed, failed, summary } = agentData;
+                    return (
+                      <div key={idx} className="bg-gray-900 border border-gray-800/80 rounded p-3 text-xs font-mono max-w-3xl shadow-md border-l-4 border-l-indigo-500">
+                        <div className="flex items-center gap-2 text-[11px]">
+                          <span className="text-gray-500">📋</span>
+                          <span className="text-gray-400">Background Agents</span>
+                          <span className="text-gray-600">·</span>
+                          <span className="text-blue-400">{summary.active_count} active</span>
+                          <span className="text-green-400">{summary.completed_count} done</span>
+                          {summary.failed_count > 0 && (
+                            <span className="text-red-400">{summary.failed_count} failed</span>
+                          )}
+                        </div>
+                        {active.length > 0 && active.map((j: any) => (
+                          <div key={j.jobId} className="flex items-center gap-2 text-[10px] py-0.5">
+                            <span className="text-blue-400">●</span>
+                            <span className="text-gray-300">{j.jobId}</span>
+                            <span className="text-gray-600">{j.mode}</span>
+                          </div>
+                        ))}
+                        {completed.length > 0 && completed.map((j: any) => (
+                          <div key={j.jobId} className="flex items-center gap-2 text-[10px] py-0.5">
+                            <span className="text-green-400">✓</span>
+                            <span className="text-gray-300">{j.jobId}</span>
+                            <span className="text-gray-600">{j.mode}</span>
+                          </div>
+                        ))}
+                        {failed.length > 0 && failed.map((j: any) => (
+                          <div key={j.jobId} className="flex items-center gap-2 text-[10px] py-0.5">
+                            <span className="text-red-400">✗</span>
+                            <span className="text-gray-300">{j.jobId}</span>
+                            <span className="text-gray-600">{j.mode}</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  }
+                  
+                  // Status card (get_agent_status fallback)
+                  return (
+                    <div key={idx} className="bg-gray-900 border border-gray-800/80 rounded p-3 text-xs font-mono max-w-3xl shadow-md border-l-4 border-l-indigo-500">
+                      <div className="flex items-center gap-2 text-[11px]">
+                        <span className="text-gray-500">📋</span>
+                        <span className="text-gray-300 font-medium">{agentData?.jobId || m.toolArgs?.job_id}</span>
+                        <span className="text-gray-600">·</span>
+                        <span className="text-gray-500">{agentData?.mode}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${getStatusColor(agentData?.status || 'unknown')}`}>
+                          {agentData?.status}
+                        </span>
+                      </div>
+                      {agentData?.model && (
+                        <div className="text-gray-600 text-[10px] mt-1">
+                          {agentData.model}
+                        </div>
+                      )}
+                      {agentData?.result && (
+                        <div className="text-green-400/70 text-[10px] mt-1 line-clamp-1">
+                          {agentData.result}
+                        </div>
+                      )}
+                    </div>
+                  );
                 }
                 
                 return (
@@ -955,12 +1441,24 @@ export default function App() {
                         >
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-xs font-bold text-gray-300">{j.job_id}</span>
-                            <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border ${getStatusColor(j.status)}`}>
-                              <span className="flex items-center gap-1">
-                                <Loader2 className="w-2.5 h-3 animate-spin" />
-                                running
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border ${getStatusColor(j.status)}`}>
+                                <span className="flex items-center gap-1">
+                                  <Loader2 className="w-2.5 h-3 animate-spin" />
+                                  running
+                                </span>
                               </span>
-                            </span>
+                              <button
+                                className="p-1 rounded hover:bg-red-900/50 text-gray-500 hover:text-red-400 transition-colors"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  cancelJob(j.job_id);
+                                }}
+                                title="Stop job"
+                              >
+                                <Square className="w-3 h-3" />
+                              </button>
+                            </div>
                           </div>
 
                           <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-2">
@@ -1074,28 +1572,32 @@ export default function App() {
                               </button>
                               {isAgentExpanded && (
                                 <div className="bg-gray-950 border border-gray-800/80 p-2.5 rounded text-[11px] leading-relaxed max-h-48 overflow-y-auto space-y-1.5 text-gray-300 font-mono">
-                                  {toolLogs.map((log: any, lIdx: number) => {
-                                    const args = log.name === 'execute_command' ? log.args?.command : 
-                                                 log.name === 'read_file' || log.name === 'write_file' ? log.args?.path :
-                                                 log.name === 'list_directory' ? (log.args?.path || '.') : '';
-                                    let output = '';
-                                    if (log.name === 'execute_command' && log.result) {
-                                      const cmdResult = typeof log.result === 'string' ? JSON.parse(log.result) : log.result;
-                                      output = cmdResult.stdout?.trim() || (cmdResult.exit_code === 0 ? '✓' : `exit ${cmdResult.exit_code}`);
-                                    } else if (log.name === 'list_directory' && log.result?.files) {
-                                      output = log.result.files.map((f: any) => f.type === 'directory' ? `${f.name}/` : f.name).join(', ');
-                                    } else if (log.name === 'read_file' && log.result?.content) {
-                                      output = log.result.content.length > 60 ? log.result.content.slice(0, 60) + '...' : log.result.content;
-                                    } else if (log.name === 'write_file' && log.result?.message) {
-                                      output = '✓';
-                                    }
-                                    return (
-                                      <div key={lIdx} className="flex flex-col">
-                                        <span className="text-indigo-400">▸ {log.name} <span className="text-gray-500">{args}</span></span>
-                                        {output && <span className="text-gray-500 ml-4">{output}</span>}
-                                      </div>
-                                    );
-                                  })}
+                                  {toolLogs.length === 0 ? (
+                                    <div className="text-gray-600 italic">No tool logs</div>
+                                  ) : (
+                                    toolLogs.map((log: any, lIdx: number) => {
+                                      const args = log.name === 'execute_command' ? log.args?.command : 
+                                                   log.name === 'read_file' || log.name === 'write_file' ? log.args?.path :
+                                                   log.name === 'list_directory' ? (log.args?.path || '.') : '';
+                                      let output = '';
+                                      if (log.name === 'execute_command' && log.result) {
+                                        const cmdResult = typeof log.result === 'string' ? JSON.parse(log.result) : log.result;
+                                        output = cmdResult.stdout?.trim() || (cmdResult.exit_code === 0 ? '✓' : `exit ${cmdResult.exit_code}`);
+                                      } else if (log.name === 'list_directory' && log.result?.files) {
+                                        output = log.result.files.map((f: any) => f.type === 'directory' ? `${f.name}/` : f.name).join(', ');
+                                      } else if (log.name === 'read_file' && log.result?.content) {
+                                        output = log.result.content.length > 60 ? log.result.content.slice(0, 60) + '...' : log.result.content;
+                                      } else if (log.name === 'write_file' && log.result?.message) {
+                                        output = '✓';
+                                      }
+                                      return (
+                                        <div key={lIdx} className="flex flex-col">
+                                          <span className="text-indigo-400">▸ {log.name} <span className="text-gray-500">{args}</span></span>
+                                          {output && <span className="text-gray-500 ml-4">{output}</span>}
+                                        </div>
+                                      );
+                                    })
+                                  )}
                                 </div>
                               )}
                               {summaryLog && (
