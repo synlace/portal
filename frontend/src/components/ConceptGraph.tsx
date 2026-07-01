@@ -6,6 +6,8 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
+  useReactFlow,
+  ReactFlowProvider,
   type Node,
   type Edge,
   type NodeTypes,
@@ -36,6 +38,7 @@ interface ConceptGraphProps {
   graph: ConceptGraphData | null;
   activeNode: string | null;
   onNodeClick: (nodeId: string) => void;
+  isFullscreen?: boolean;
 }
 
 // ─── Dagre layout helper ────────────────────────────────────────────────────
@@ -109,7 +112,7 @@ function ConceptNodeComponent({ data }: { data: ConceptNodeData; selected?: bool
   return (
     <div
       className={`
-        px-4 py-2 rounded-lg text-center font-mono text-xs font-bold transition-all cursor-pointer
+        px-4 py-2 rounded-lg text-center font-mono text-xs font-bold transition-all cursor-pointer select-none
         ${isRoot
           ? 'bg-violet-950/80 border-2 border-violet-500 text-violet-200 shadow-lg shadow-violet-500/10'
           : isActive
@@ -133,8 +136,10 @@ const nodeTypes: NodeTypes = {
   conceptNode: ConceptNodeComponent,
 };
 
-// ─── Component ──────────────────────────────────────────────────────────────
-export default function ConceptGraph({ graph, activeNode, onNodeClick }: ConceptGraphProps) {
+// ─── Inner Component (needs ReactFlowProvider context) ──────────────────────
+function ConceptGraphInner({ graph, activeNode, onNodeClick, isFullscreen }: ConceptGraphProps) {
+  const { fitView } = useReactFlow();
+
   const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(() => {
     if (!graph || graph.concepts.length === 0) return { nodes: [], edges: [] };
     return getLayoutedElements(graph.concepts, graph.relationships);
@@ -159,6 +164,15 @@ export default function ConceptGraph({ graph, activeNode, onNodeClick }: Concept
   useEffect(() => {
     setNodes(enrichedNodes);
   }, [enrichedNodes, setNodes]);
+
+  // Fit view when entering fullscreen
+  useEffect(() => {
+    if (isFullscreen) {
+      const timer = setTimeout(() => fitView({ padding: 0.3, duration: 300 }), 50);
+      return () => clearTimeout(timer);
+    }
+    return undefined;
+  }, [isFullscreen, fitView]);
 
   const handleNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     onNodeClick(node.id);
@@ -186,15 +200,16 @@ export default function ConceptGraph({ graph, activeNode, onNodeClick }: Concept
         fitView
         fitViewOptions={{ padding: 0.3 }}
         proOptions={{ hideAttribution: true }}
-        nodesDraggable={false}
+        nodesDraggable={true}
         nodesConnectable={false}
         elementsSelectable={false}
-        panOnDrag={false}
-        zoomOnScroll={false}
-        zoomOnPinch={false}
-        zoomOnDoubleClick={false}
-        minZoom={0.5}
-        maxZoom={2}
+        panOnDrag={true}
+        panOnScroll={true}
+        zoomOnScroll={true}
+        zoomOnPinch={true}
+        zoomOnDoubleClick={true}
+        minZoom={0.2}
+        maxZoom={4}
       >
         <Background color="#1f2937" gap={20} size={1} />
         <Controls showInteractive={false} />
@@ -205,5 +220,14 @@ export default function ConceptGraph({ graph, activeNode, onNodeClick }: Concept
         />
       </ReactFlow>
     </div>
+  );
+}
+
+// ─── Exported Component (wrapped in ReactFlowProvider) ──────────────────────
+export default function ConceptGraph(props: ConceptGraphProps) {
+  return (
+    <ReactFlowProvider>
+      <ConceptGraphInner {...props} />
+    </ReactFlowProvider>
   );
 }
