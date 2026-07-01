@@ -264,16 +264,23 @@ async def chat_stream(request: ChatRequest):
     
     # Determine API key and base URL based on provider
     if request.base_url:
-        # OpenRouter or custom endpoint
-        api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")
+        # OpenRouter or custom endpoint - require OPENROUTER_API_KEY
+        api_key = os.environ.get("OPENROUTER_API_KEY")
         base_url = request.base_url
+        if not api_key:
+            raise HTTPException(
+                status_code=400, 
+                detail="OPENROUTER_API_KEY not set. Add it to your .env file to use OpenRouter models."
+            )
     else:
         # OpenAI direct
         api_key = os.environ.get("OPENAI_API_KEY")
         base_url = None
-    
-    if not api_key:
-        raise HTTPException(status_code=400, detail="API key not set.")
+        if not api_key:
+            raise HTTPException(
+                status_code=400, 
+                detail="OPENAI_API_KEY not set. Add it to your .env file or enter it in the UI."
+            )
     
     client = OpenAI(api_key=api_key, base_url=base_url) if base_url else OpenAI(api_key=api_key)
     
