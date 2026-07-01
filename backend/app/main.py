@@ -205,6 +205,29 @@ async def speech_to_text(audio: UploadFile = File(...)):
         logger.error(f"Whisper transcription failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Transcription failed: {str(e)}")
 
+class TTSRequest(BaseModel):
+    text: str
+
+@app.post("/api/tts")
+async def text_to_speech(request: TTSRequest):
+    """Convert text to speech using OpenAI TTS."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="OpenAI API Key not set.")
+    
+    client = OpenAI(api_key=api_key)
+    
+    try:
+        response = client.audio.speech.create(
+            model="tts-1",
+            voice="alloy",
+            input=request.text
+        )
+        return Response(content=response.content, media_type="audio/mpeg")
+    except Exception as e:
+        logger.error(f"TTS failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"TTS failed: {str(e)}")
+
 class ChatMessage(BaseModel):
     role: str
     content: str

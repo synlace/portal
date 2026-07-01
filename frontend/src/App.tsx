@@ -279,6 +279,32 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Spacebar push-to-talk in streaming mode
+  useEffect(() => {
+    if (connectionMode !== 'streaming') return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && !e.repeat && isConnected && !isRecording) {
+        e.preventDefault();
+        toggleRecording();
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space' && isRecording) {
+        e.preventDefault();
+        toggleRecording();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+    };
+  }, [connectionMode, isConnected, isRecording]);
+
   // Cancel a running job
   const cancelJob = async (jobId: string) => {
     try {
@@ -757,6 +783,9 @@ export default function App() {
     };
     setMessages(prev => [...prev, assistantMsg]);
     
+    let accumulatedText = '';
+    let hasToolCalls = false;
+    
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
@@ -785,12 +814,14 @@ export default function App() {
               const event = JSON.parse(data);
               
               if (event.type === 'text_delta') {
+                accumulatedText += event.content;
                 setMessages(prev => prev.map(m => 
                   m.id === assistantMsgId 
                     ? { ...m, text: (m.text || '') + event.content }
                     : m
                 ));
               } else if (event.type === 'tool_call') {
+                hasToolCalls = true;
                 const toolMsg: Message = {
                   role: 'tool',
                   toolName: event.name,
@@ -825,6 +856,27 @@ export default function App() {
               }
             } catch {}
           }
+        }
+      }
+      
+      // Play TTS for the response if there's text and no tool calls
+      if (accumulatedText && !hasToolCalls) {
+        try {
+          const ttsResponse = await fetch('/api/tts', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: accumulatedText })
+          });
+          
+          if (ttsResponse.ok) {
+            const audioBlob = await ttsResponse.blob();
+            const audioUrl = URL.createObjectURL(audioBlob);
+            const audio = new Audio(audioUrl);
+            audio.onended = () => URL.revokeObjectURL(audioUrl);
+            await audio.play();
+          }
+        } catch (ttsErr) {
+          console.error('TTS playback failed:', ttsErr);
         }
       }
     } catch (err) {
