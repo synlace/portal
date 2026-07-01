@@ -270,6 +270,8 @@ ANALYSIS APPROACH:
 {src_only_note}
 4. Read key entry points (main.ts, app.py, index.js, main.py, etc.)
 5. Read config files for service definitions
+6. Identify infrastructure components (databases, message queues, caches, storage)
+7. Identify cross-cutting concerns (auth, rate limiting, mTLS, CORS, logging)
 
 OUTPUT FORMAT — you MUST output a JSON object with this exact structure as your final response:
 
@@ -277,7 +279,7 @@ OUTPUT FORMAT — you MUST output a JSON object with this exact structure as you
 {{
   "graph": {{
     "concepts": [
-      {{ "id": "concept-id", "label": "Concept Name", "parent": "parent-id-or-null", "x": 200, "y": 50 }}
+      {{ "id": "concept-id", "label": "Concept Name", "type": "service", "parent": "parent-id-or-null" }}
     ],
     "specs": {{
       "concept-id": ["spec-filename.md"]
@@ -295,11 +297,16 @@ OUTPUT FORMAT — you MUST output a JSON object with this exact structure as you
 }}
 ```
 
+CONCEPT TYPES:
+- "service": A microservice or application component that processes requests (e.g., API Gateway, User Service, Auth Service)
+- "infrastructure": A shared data store or external system (e.g., PostgreSQL, Redis, Kafka, S3). Set "connectedTo" to an array of service IDs that use this infrastructure.
+- "cross-cutting": A policy or pattern that applies across multiple services (e.g., mTLS, JWT Auth, Rate Limiting, CORS). Set "appliesTo" to an array of service IDs it affects.
+
 RULES:
 - Generate 5-15 concepts (not too many, not too few)
 - Each concept should map to a real part of the codebase
-- Position nodes in a tree layout: root at top (y=50), children below (y=150, y=250, etc.)
-- Space nodes horizontally (x: 50-600 range)
+- Include at least one infrastructure node if the project uses databases, caches, or message queues
+- Include cross-cutting concerns if the project has auth, rate limiting, or security patterns
 - Specs should be useful starting points with real content extracted from the code, not empty placeholders
 - Include overview, architecture, key decisions, and open questions in each spec
 - If the codebase is large, focus on the top-level architecture

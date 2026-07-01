@@ -10,12 +10,15 @@ import toolsSchema from '../../tools.json';
 import ConceptGraph from './components/ConceptGraph';
 
 // ─── Types for concept graph and specs ───────────────────────────────────────
+type ConceptNodeType = 'service' | 'infrastructure' | 'cross-cutting';
+
 interface ConceptNode {
   id: string;
   label: string;
   parent: string | null;
-  x: number;
-  y: number;
+  type?: ConceptNodeType;
+  appliesTo?: string[];
+  connectedTo?: string[];
 }
 
 interface ConceptRelationship {
@@ -265,9 +268,9 @@ export default function App() {
   const [conceptGraph, setConceptGraph] = useState<ConceptGraph | null>(null);
   const [specFiles, setSpecFiles] = useState<SpecFile[]>([]);
   const [activeSpec, setActiveSpec] = useState<string | null>(null);
-  const [specChatMessages, setSpecChatMessages] = useState<Record<string, SpecChatMessage[]>>({});
+  const [conceptChatMessages, setConceptChatMessages] = useState<Record<string, SpecChatMessage[]>>({});
   const [specChatInput, setSpecChatInput] = useState('');
-  const [activeConceptThread, setActiveConceptThread] = useState<string | null>(null);
+  const [activeConcept, setActiveConcept] = useState<string | null>(null);
   const [graphFullscreen, setGraphFullscreen] = useState(false);
 
   // Refs for SDK session and audio
@@ -472,28 +475,28 @@ export default function App() {
     setSetupStatus('ready');
   }, []);
 
-  // ─── Spec chat handler ─────────────────────────────────────────────────────
-  const sendSpecChat = useCallback((specFilename: string) => {
+  // ─── Concept chat handler (scoped to concept, not spec) ───────────────────
+  const sendConceptChat = useCallback((conceptId: string) => {
     const input = specChatInput.trim();
     if (!input) return;
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     const userMsg: SpecChatMessage = { role: 'user', text: input, time };
 
-    setSpecChatMessages(prev => ({
+    setConceptChatMessages(prev => ({
       ...prev,
-      [specFilename]: [...(prev[specFilename] || []), userMsg],
+      [conceptId]: [...(prev[conceptId] || []), userMsg],
     }));
     setSpecChatInput('');
 
     setTimeout(() => {
       const aiMsg: SpecChatMessage = {
         role: 'model',
-        text: `I've reviewed the document. Let me think about "${input}" in the context of this spec. I can help you update or clarify this section. What specific changes would you like?`,
+        text: `I've reviewed the specs for this concept. Let me think about "${input}" in this context. I can help you update or clarify any of the associated documents. What specific changes would you like?`,
         time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
-      setSpecChatMessages(prev => ({
+      setConceptChatMessages(prev => ({
         ...prev,
-        [specFilename]: [...(prev[specFilename] || []), aiMsg],
+        [conceptId]: [...(prev[conceptId] || []), aiMsg],
       }));
     }, 800);
   }, [specChatInput]);
@@ -1436,10 +1439,12 @@ export default function App() {
               <div className="relative bg-gray-950/40 overflow-hidden" style={{ minHeight: 280 }}>
                 <ConceptGraph
                   graph={conceptGraph}
-                  activeNode={activeConceptThread}
+                  activeNode={activeConcept}
                   onNodeClick={(nodeId) => {
-                    setActiveConceptThread(nodeId);
-                    setActiveSpec(null);
+                    setActiveConcept(nodeId);
+                    // Auto-select first spec of the concept
+                    const specs = conceptGraph?.specs[nodeId];
+                    setActiveSpec(specs && specs.length > 0 ? specs[0] : null);
                   }}
                 />
               </div>
@@ -1447,25 +1452,37 @@ export default function App() {
               {/* Specs Divider */}
               <div className="px-5 py-2 border-b border-t border-gray-800/50 bg-gray-900/20 flex items-center justify-between shrink-0">
                 <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
-                  📄 Specifications
+                  📄 {activeConcept ? conceptGraph?.concepts.find(c => c.id === activeConcept)?.label || 'Concept' : 'All Specs'}
                 </span>
-                <span className="text-[9px] text-gray-600">{specFiles.length} files</span>
+                <span className="text-[9px] text-gray-600">
+                  {activeConcept
+                    ? (conceptGraph?.specs[activeConcept]?.length || 0) + ' specs'
+                    : specFiles.length + ' files'
+                  }
+                </span>
               </div>
 
-              {/* Specs List */}
+              {/* Specs List — filtered by active concept */}
               <div className="flex-1 overflow-y-auto">
-                {specFiles.length === 0 ? (
+                {(activeConcept ? specFiles.filter(s => conceptGraph?.specs[activeConcept]?.includes(s.filename)) : specFiles).length === 0 ? (
                   <div className="text-center p-6 text-gray-600 text-[11px]">
                     <div className="text-2xl mb-2 opacity-30">📄</div>
-                    No specs yet.
+                    {activeConcept ? 'No specs for this concept.' : 'No specs yet.'}
                   </div>
                 ) : (
-                  specFiles.map(spec => (
+                  (activeConcept ? specFiles.filter(s => conceptGraph?.specs[activeConcept]?.includes(s.filename)) : specFiles).map(spec => (
                     <div
                       key={spec.filename}
                       onClick={() => {
-                        setActiveSpec(spec.filename);
-                        setActiveConceptThread(null);
+                        if (activeConcept) {
+                          setActiveSpec(spec.filename);
+                        } else {
+                          const conceptForSpec = Object.entries(conceptGraph?.specs || {}).find(([, specs]) => specs.includes(spec.filename))?.[0];
+                          if (conceptForSpec) {
+                            setActiveConcept(conceptForSpec);
+                            setActiveSpec(spec.filename);
+                          }
+                        }
                       }}
                       className={`px-5 py-2.5 cursor-pointer transition-all border-b border-gray-800/30 hover:bg-gray-900/40 ${
                         activeSpec === spec.filename ? 'bg-gray-900/60 border-l-2 border-l-violet-500' : ''
@@ -1484,44 +1501,57 @@ export default function App() {
               </div>
             </section>
 
-            {/* ═══ MIDDLE COLUMN: CONVERSATION OR SPEC SPLIT VIEW ═══════════ */}
+            {/* ═══ MIDDLE COLUMN: CONCEPT PANEL OR CONVERSATION ═══════════════ */}
             <section className="flex-1 flex flex-col bg-gray-900/5 overflow-hidden">
-              {activeSpec ? (
-                /* ─── SPEC SPLIT VIEW ──────────────────────────────────────── */
+              {activeConcept ? (
+                /* ─── CONCEPT PANEL ────────────────────────────────────────── */
                 <>
-                  {/* Spec Header */}
-                  <div className="px-4 py-2 bg-gray-950/60 border-b border-gray-800/40 flex items-center justify-between shrink-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-gray-400 text-xs">📄</span>
-                      <span className="text-xs font-bold text-gray-300">{activeSpec}</span>
-                      <span className="text-gray-600 text-xs">·</span>
-                      <span className="text-[10px] text-gray-500">Discussion about this spec</span>
+                  {/* Spec Tabs */}
+                  {(conceptGraph?.specs[activeConcept] || []).length > 0 && (
+                    <div className="flex items-center border-b border-gray-800/50 bg-gray-950/30 shrink-0 overflow-x-auto">
+                      {(conceptGraph?.specs[activeConcept] || []).map(specName => (
+                        <button
+                          key={specName}
+                          onClick={() => setActiveSpec(specName)}
+                          className={`px-4 py-2 text-[10px] font-bold uppercase tracking-wider border-b-2 transition-colors whitespace-nowrap font-mono ${
+                            activeSpec === specName
+                              ? 'text-violet-300 border-violet-500 bg-violet-950/10'
+                              : 'text-gray-500 border-transparent hover:text-gray-300'
+                          }`}
+                        >
+                          📄 {specName}
+                        </button>
+                      ))}
                     </div>
-                    <button onClick={() => setActiveSpec(null)} className="text-gray-600 hover:text-gray-300 text-xs transition-colors">
-                      ✕ Close
-                    </button>
-                  </div>
+                  )}
 
-                  {/* Split: Document + Chat */}
-                  <div className="flex-1 flex overflow-hidden">
-                    {/* Document Pane */}
-                    <div className="flex-1 overflow-y-auto border-r border-gray-800/50 p-6">
-                      <div className="prose prose-invert prose-sm max-w-none">
-                        <Markdown remarkPlugins={[remarkGfm]}>
-                          {specFiles.find(s => s.filename === activeSpec)?.content || ''}
-                        </Markdown>
-                      </div>
+                  {/* Split: Spec Content + Concept Chat */}
+                  <div className="flex-1 flex overflow-hidden min-h-0">
+                    {/* Spec Content Pane */}
+                    <div className="flex-1 overflow-y-auto p-6 min-w-0">
+                      {activeSpec ? (
+                        <div className="prose prose-invert prose-sm max-w-none">
+                          <Markdown remarkPlugins={[remarkGfm]}>
+                            {specFiles.find(s => s.filename === activeSpec)?.content || ''}
+                          </Markdown>
+                        </div>
+                      ) : (
+                        <div className="h-full flex flex-col items-center justify-center text-center text-gray-600">
+                          <div className="text-3xl mb-3 opacity-20">📄</div>
+                          <p className="text-xs">Select a spec tab above to view its content.</p>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Spec Chat Pane */}
-                    <div className="w-[360px] flex flex-col shrink-0">
-                      <div className="px-4 py-2 border-b border-gray-800/40 bg-gray-900/20 text-[10px] text-gray-500 shrink-0 flex items-center gap-1.5">
-                        💬 Chat about this spec
+                    {/* Concept Chat Pane */}
+                    <div className="w-[360px] border-l border-gray-800/50 flex flex-col shrink-0">
+                      <div className="px-4 py-2 border-b border-gray-800/40 bg-gray-900/20 text-[10px] text-gray-500 shrink-0 flex items-center gap-1.5 font-mono">
+                        💬 Chat about this concept
                       </div>
                       <div className="flex-1 overflow-y-auto p-4 space-y-3 text-xs">
-                        {(specChatMessages[activeSpec] || []).map((msg, i) => (
+                        {(conceptChatMessages[activeConcept] || []).map((msg, i) => (
                           <div key={i} className={`flex flex-col gap-1 ${msg.role === 'user' ? 'max-w-[85%] ml-auto items-end' : 'max-w-[85%] mr-auto items-start'}`}>
-                            <span className="text-[10px] text-gray-500 font-bold px-1 uppercase">
+                            <span className="text-[10px] text-gray-500 font-bold px-1 uppercase font-mono">
                               {msg.role === 'user' ? 'You' : 'Assistant'} <span className="text-gray-600 normal-case font-normal">{msg.time}</span>
                             </span>
                             <div className={`p-3 rounded-lg shadow text-sm leading-relaxed ${
@@ -1536,13 +1566,13 @@ export default function App() {
                         <div className="flex gap-2 items-center">
                           <input
                             type="text"
-                            placeholder="Ask about this spec..."
+                            placeholder={`Ask about ${conceptGraph?.concepts.find(c => c.id === activeConcept)?.label || 'this concept'}...`}
                             value={specChatInput}
                             onChange={(e) => setSpecChatInput(e.target.value)}
-                            onKeyDown={(e) => e.key === 'Enter' && sendSpecChat(activeSpec)}
-                            className="flex-1 bg-gray-900 border border-gray-800 focus:border-violet-500 text-white rounded px-3 py-2.5 focus:outline-none transition-colors text-xs"
+                            onKeyDown={(e) => e.key === 'Enter' && sendConceptChat(activeConcept)}
+                            className="flex-1 bg-gray-900 border border-gray-800 focus:border-violet-500 text-white rounded px-3 py-2.5 focus:outline-none transition-colors text-xs font-mono"
                           />
-                          <button onClick={() => sendSpecChat(activeSpec)} className="bg-violet-600 hover:bg-violet-700 p-2.5 rounded-lg text-white px-4 font-bold text-xs shrink-0">
+                          <button onClick={() => sendConceptChat(activeConcept)} className="bg-violet-600 hover:bg-violet-700 p-2.5 rounded-lg text-white px-4 font-bold text-xs shrink-0">
                             Send
                           </button>
                         </div>
@@ -2046,10 +2076,11 @@ export default function App() {
               <div className="flex-1 bg-gray-950">
                 <ConceptGraph
                   graph={conceptGraph}
-                  activeNode={activeConceptThread}
+                  activeNode={activeConcept}
                   onNodeClick={(nodeId) => {
-                    setActiveConceptThread(nodeId);
-                    setActiveSpec(null);
+                    setActiveConcept(nodeId);
+                    const specs = conceptGraph?.specs[nodeId];
+                    setActiveSpec(specs && specs.length > 0 ? specs[0] : null);
                     setGraphFullscreen(false);
                   }}
                   isFullscreen={true}
