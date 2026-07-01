@@ -1422,7 +1422,7 @@ export default function App() {
             {/* ═══ LEFT COLUMN: CONCEPT GRAPH + SPECS ═══════════════════════ */}
             <section className="w-[340px] border-r border-gray-800/80 bg-gray-950/35 flex flex-col shrink-0 overflow-hidden">
               {/* Graph Header */}
-              <div className="px-5 py-2.5 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between shrink-0">
+              <div className="px-5 py-3 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between shrink-0">
                 <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
                   📊 Concept Graph
                 </span>
@@ -1450,7 +1450,7 @@ export default function App() {
               </div>
 
               {/* Specs Divider */}
-              <div className="px-5 py-2 border-b border-t border-gray-800/50 bg-gray-900/20 flex items-center justify-between shrink-0">
+              <div className="px-5 py-3 border-b border-t border-gray-800/50 bg-gray-900/20 flex items-center justify-between shrink-0">
                 <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
                   📄 {activeConcept ? conceptGraph?.concepts.find(c => c.id === activeConcept)?.label || 'Concept' : 'All Specs'}
                 </span>
@@ -1513,7 +1513,7 @@ export default function App() {
                         <button
                           key={specName}
                           onClick={() => setActiveSpec(specName)}
-                          className={`px-4 py-2 text-[10px] font-bold uppercase tracking-wider border-b-2 transition-colors whitespace-nowrap font-mono ${
+                          className={`px-5 py-3 text-[10px] font-bold uppercase tracking-wider border-b-2 transition-colors whitespace-nowrap font-mono ${
                             activeSpec === specName
                               ? 'text-violet-300 border-violet-500 bg-violet-950/10'
                               : 'text-gray-500 border-transparent hover:text-gray-300'
@@ -1545,9 +1545,6 @@ export default function App() {
 
                     {/* Concept Chat Pane */}
                     <div className="w-[360px] border-l border-gray-800/50 flex flex-col shrink-0">
-                      <div className="px-4 py-2 border-b border-gray-800/40 bg-gray-900/20 text-[10px] text-gray-500 shrink-0 flex items-center gap-1.5 font-mono">
-                        💬 Chat about this concept
-                      </div>
                       <div className="flex-1 overflow-y-auto p-4 space-y-3 text-xs">
                         {(conceptChatMessages[activeConcept] || []).map((msg, i) => (
                           <div key={i} className={`flex flex-col gap-1 ${msg.role === 'user' ? 'max-w-[85%] ml-auto items-end' : 'max-w-[85%] mr-auto items-start'}`}>
@@ -1583,7 +1580,7 @@ export default function App() {
               ) : (
                 /* ─── NORMAL CONVERSATION VIEW ──────────────────────────────── */
                 <>
-                  <div className="px-6 py-4 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between">
+                  <div className="px-5 py-3 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between shrink-0">
                     <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">Conversation</span>
                     <span className="text-xs text-violet-400 font-semibold">{messages.length} messages</span>
                   </div>
@@ -1832,7 +1829,7 @@ export default function App() {
 
             {/* ═══ RIGHT COLUMN: BACKGROUND AGENTS ═══════════════════════════ */}
             <section className="w-96 border-l border-gray-800/80 bg-gray-900/10 flex flex-col shrink-0">
-              <div className="px-6 py-4 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between">
+              <div className="px-5 py-3 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2">
                   <Cpu className="w-4 h-4 text-indigo-400 animate-pulse" />
                   <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">Agents</span>
