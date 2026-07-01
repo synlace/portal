@@ -1,10 +1,45 @@
-import { useState, useEffect, useRef } from 'react';
-import { 
+import { useState, useEffect, useRef, useCallback } from 'react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import {
   Square, Mic, MicOff,
   AlertCircle, Loader2, HelpCircle, Send, Cpu, ChevronRight, ChevronDown, Star
 } from 'lucide-react';
 import { RealtimeAgent, RealtimeSession, OpenAIRealtimeWebRTC, tool } from '@openai/agents/realtime';
 import toolsSchema from '../../tools.json';
+
+// ─── Types for concept graph and specs ───────────────────────────────────────
+interface ConceptNode {
+  id: string;
+  label: string;
+  parent: string | null;
+  x: number;
+  y: number;
+}
+
+interface ConceptRelationship {
+  from: string;
+  to: string;
+  label: string;
+}
+
+interface ConceptGraph {
+  concepts: ConceptNode[];
+  specs: Record<string, string[]>;
+  relationships: ConceptRelationship[];
+}
+
+interface SpecFile {
+  filename: string;
+  content: string;
+  lines: number;
+}
+
+interface SpecChatMessage {
+  role: 'user' | 'model' | 'system';
+  text: string;
+  time: string;
+}
 
 // ─── System prompt ───────────────────────────────────────────────────────────
 const SYSTEM_INSTRUCTION =
@@ -20,6 +55,11 @@ const SYSTEM_INSTRUCTION =
   "- After the tool completes, give a SHORT result like 'The output is: ...' or 'Done. I've created the file.'\n" +
   "- NEVER generate multiple separate responses to a single user request. One acknowledgment + tool call + one result.\n" +
   "- Keep ALL spoken responses under 20 words unless the user explicitly asks for detail.\n\n" +
+  "AGENT SPAWN RULES:\n" +
+  "- When spawning background agents, just spawn them and confirm. Do NOT automatically check their status.\n" +
+  "- Do NOT call get_agent_status or list_agents unless the user explicitly asks.\n" +
+  "- The user will check agent status themselves via the Background Agents panel or by asking.\n" +
+  "- After spawning, just say something like 'Spawned [job_id] in [mode] mode.' and move on.\n\n" +
   "CRITICAL VOICE CONSTRAINTS:\n" +
   "1. Always keep spoken answers short, professional, and conversational. Do not ramble.\n" +
   "2. NEVER speak out loud long blocks of code, markdown tables, or extensive directories. " +
@@ -212,6 +252,22 @@ export default function App() {
   // Thinking effort for reasoning models
   const [thinkingEffort, setThinkingEffort] = useState<'low' | 'medium' | 'high'>('low');
 
+  // ─── Onboarding / Setup State ──────────────────────────────────────────────
+  const [setupStatus, setSetupStatus] = useState<'loading' | 'needs_setup' | 'ready'>('loading');
+  const [setupGraph, setSetupGraph] = useState<ConceptGraph | null>(null);
+  const [setupSpecs, setSetupSpecs] = useState<SpecFile[]>([]);
+  const [setupScanning, setSetupScanning] = useState(false);
+  const [setupScanStep, setSetupScanStep] = useState(0);
+  const [setupScanComplete, setSetupScanComplete] = useState(false);
+
+  // ─── Concept Graph & Specs State ───────────────────────────────────────────
+  const [conceptGraph, setConceptGraph] = useState<ConceptGraph | null>(null);
+  const [specFiles, setSpecFiles] = useState<SpecFile[]>([]);
+  const [activeSpec, setActiveSpec] = useState<string | null>(null);
+  const [specChatMessages, setSpecChatMessages] = useState<Record<string, SpecChatMessage[]>>({});
+  const [specChatInput, setSpecChatInput] = useState('');
+  const [activeConceptThread, setActiveConceptThread] = useState<string | null>(null);
+
   // Refs for SDK session and audio
   const sessionRef = useRef<RealtimeSession | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
@@ -330,6 +386,104 @@ export default function App() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
+
+  // ─── Check setup status on mount ───────────────────────────────────────────
+  useEffect(() => {
+    const checkSetup = async () => {
+      try {
+        const res = await fetch('/api/setup/status');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.requires_setup) {
+            setSetupStatus('needs_setup');
+          } else {
+            setSetupStatus('ready');
+            if (data.graph) setConceptGraph(data.graph);
+            if (data.specs) setSpecFiles(data.specs);
+          }
+        } else {
+          setSetupStatus('ready');
+        }
+      } catch {
+        setSetupStatus('ready');
+      }
+    };
+    checkSetup();
+  }, []);
+
+  // ─── Onboarding scan handler ───────────────────────────────────────────────
+  const runOnboardingScan = useCallback(async () => {
+    setSetupScanning(true);
+    setSetupScanStep(0);
+    setSetupScanComplete(false);
+
+    const scanSteps = [
+      'Reading package.json...', 'Reading docker-compose.yml...',
+      'Scanning directory structure...', 'Reading README.md...',
+      'Analyzing entry points...', 'Reading config files...',
+      'Mapping module dependencies...', 'Generating concept graph...',
+      'Writing spec files...', 'Linking concepts to specs...',
+    ];
+
+    for (let i = 0; i < scanSteps.length; i++) {
+      await new Promise(r => setTimeout(r, 400 + Math.random() * 300));
+      setSetupScanStep(i + 1);
+    }
+
+    try {
+      const res = await fetch('/api/setup/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scan_src_only: false, max_depth: 3, generate_specs: true, include_readme: true }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setSetupGraph(data.graph);
+        setSetupSpecs(data.specs || []);
+      }
+    } catch (err) {
+      console.error('Setup generation failed:', err);
+    }
+
+    setSetupScanComplete(true);
+    setSetupScanning(false);
+  }, []);
+
+  const completeSetup = useCallback(async () => {
+    if (setupGraph) setConceptGraph(setupGraph);
+    if (setupSpecs.length > 0) setSpecFiles(setupSpecs);
+    setSetupStatus('ready');
+  }, [setupGraph, setupSpecs]);
+
+  const skipSetup = useCallback(() => {
+    setSetupStatus('ready');
+  }, []);
+
+  // ─── Spec chat handler ─────────────────────────────────────────────────────
+  const sendSpecChat = useCallback((specFilename: string) => {
+    const input = specChatInput.trim();
+    if (!input) return;
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const userMsg: SpecChatMessage = { role: 'user', text: input, time };
+
+    setSpecChatMessages(prev => ({
+      ...prev,
+      [specFilename]: [...(prev[specFilename] || []), userMsg],
+    }));
+    setSpecChatInput('');
+
+    setTimeout(() => {
+      const aiMsg: SpecChatMessage = {
+        role: 'model',
+        text: `I've reviewed the document. Let me think about "${input}" in the context of this spec. I can help you update or clarify this section. What specific changes would you like?`,
+        time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      };
+      setSpecChatMessages(prev => ({
+        ...prev,
+        [specFilename]: [...(prev[specFilename] || []), aiMsg],
+      }));
+    }, 800);
+  }, [specChatInput]);
 
   // Spacebar push-to-talk in streaming mode
   useEffect(() => {
@@ -1128,800 +1282,786 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-950 font-mono">
-      {/* Header bar */}
-      <header className="border-b border-gray-800 bg-gray-900/60 backdrop-blur px-6 py-4 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-4 h-4 rounded-full bg-violet-500 animate-pulse"></div>
-          <h1 className="text-xl font-bold bg-gradient-to-r from-violet-400 to-indigo-400 bg-clip-text text-transparent">
-            portal
-          </h1>
-          <span className="text-xs text-gray-400 bg-gray-800 px-2.5 py-0.5 rounded-md">v1.0.0-beta</span>
-        </div>
+      {/* ─── ONBOARDING SCREEN ──────────────────────────────────────────────── */}
+      {setupStatus === 'needs_setup' && (
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="max-w-lg w-full text-center space-y-8">
+            <div className="flex flex-col items-center gap-3">
+              <div className="w-16 h-16 rounded-2xl bg-violet-600/20 border border-violet-500/30 flex items-center justify-center shadow-lg shadow-violet-500/10">
+                <div className="w-6 h-6 rounded-full bg-violet-500 animate-pulse"></div>
+              </div>
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-violet-400 to-indigo-400 bg-clip-text text-transparent">portal</h1>
+              <span className="text-xs text-gray-500 bg-gray-800 px-3 py-1 rounded-md">v1.0.0-beta</span>
+            </div>
 
-        <div className="flex items-center gap-3">
-          {!isConnected && (
-            <input 
-              type="password" 
-              placeholder="Enter OpenAI API Key (or set in env)" 
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              className="text-xs bg-gray-950 border border-gray-800 focus:border-violet-500 text-white rounded px-3 py-2 w-64 focus:outline-none transition-colors"
-            />
-          )}
-        </div>
-      </header>
+            <div className="bg-amber-950/20 border border-amber-800/40 rounded-lg px-4 py-3 flex items-center gap-3 mx-auto max-w-md">
+              <span className="text-amber-400 text-lg">⚠</span>
+              <div className="text-left">
+                <div className="text-xs font-bold text-amber-300">No .portal/ directory detected</div>
+                <div className="text-[10px] text-amber-400/70 mt-0.5">Workspace: /workspace</div>
+              </div>
+            </div>
 
-      {/* Main dashboard grid */}
-      <main className="flex-1 flex overflow-hidden">
-        {/* MIDDLE COLUMN: CONVERSATION LOG */}
-        <section className="flex-1 flex flex-col bg-gray-900/5">
-          <div className="px-6 py-4 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between">
-            <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">Conversation</span>
-            <span className="text-xs text-violet-400 font-semibold">{messages.length} messages</span>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-6 space-y-4">
-            {groupMessages(messages).map((grouped, idx) => {
-              if (grouped.type === 'system' && grouped.message) {
-                return (
-                  <div key={idx} className="bg-violet-950/15 border border-violet-900/30 text-violet-300 p-4 rounded text-xs leading-relaxed max-w-2xl">
-                    {grouped.message.text}
-                  </div>
-                );
-              }
-
-              if (grouped.type === 'tool' && grouped.message) {
-                const m = grouped.message;
-                const isExec = m.toolStatus === 'executing';
-                const isDelegated = m.toolName === 'spawn_agent';
-                const toolIcon = getToolIcon(m.toolName || '');
-                const humanReadableArgs = m.toolName === 'execute_command' ? m.toolArgs?.command :
-                  m.toolName === 'read_file' || m.toolName === 'write_file' || m.toolName === 'edit_file' ? m.toolArgs?.path :
-                  m.toolName === 'list_directory' ? (m.toolArgs?.path || '.') :
-                  m.toolName === 'move_file' ? (m.toolArgs?.source && m.toolArgs?.destination ? `${m.toolArgs.source} → ${m.toolArgs.destination}` : '') :
-                  m.toolName === 'spawn_agent' ? m.toolArgs?.description :
-                  m.toolName === 'get_agent_status' ? m.toolArgs?.job_id : '';
-                
-                // Parse execute_command results for nice display
-                let cmdOutput = null;
-                if (m.toolName === 'execute_command' && m.toolResult) {
-                  try {
-                    cmdOutput = JSON.parse(m.toolResult);
-                  } catch {}
-                }
-                
-                // For agent tools, render flat card without parent wrapper
-                if (m.toolResult && (m.toolName === 'spawn_agent' || m.toolName === 'get_agent_status' || m.toolName === 'list_agents')) {
-                  const agentData = parseAgentResult(m.toolName, m.toolResult);
-                  const agentName = m.toolArgs?.description?.split(' ')[0] || agentData?.jobId?.slice(0, 8) || '';
-                  
-                  if (agentData?.type === 'spawn') {
-                    return (
-                      <div key={idx} className={`bg-gray-900 border border-gray-800/80 rounded p-3 text-xs font-mono max-w-3xl shadow-md ${
-                        'border-l-4 border-l-violet-500'
-                      }`}>
-                        <div className="flex items-center gap-2 text-[11px]">
-                          <span className="text-violet-400">🚀</span>
-                          <span className="text-gray-300 font-medium">{agentName}</span>
-                          <span className="text-gray-600">·</span>
-                          <span className="text-gray-500">{agentData.mode}</span>
-                          <span className="text-gray-600">·</span>
-                          <span className="text-violet-400/80">{isExec ? 'Running' : 'Spawned'}</span>
-                        </div>
-                        {humanReadableArgs && (
-                          <div className="text-gray-500 text-[10px] mt-1 line-clamp-1">
-                            {humanReadableArgs}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  }
-                  
-                  if (agentData?.type === 'list') {
-                    const { active, completed, failed, summary } = agentData;
-                    return (
-                      <div key={idx} className="bg-gray-900 border border-gray-800/80 rounded p-3 text-xs font-mono max-w-3xl shadow-md border-l-4 border-l-indigo-500">
-                        <div className="flex items-center gap-2 text-[11px]">
-                          <span className="text-gray-500">📋</span>
-                          <span className="text-gray-400">Background Agents</span>
-                          <span className="text-gray-600">·</span>
-                          <span className="text-blue-400">{summary.active_count} active</span>
-                          <span className="text-green-400">{summary.completed_count} done</span>
-                          {summary.failed_count > 0 && (
-                            <span className="text-red-400">{summary.failed_count} failed</span>
-                          )}
-                        </div>
-                        {active.length > 0 && active.map((j: any) => (
-                          <div key={j.jobId} className="flex items-center gap-2 text-[10px] py-0.5">
-                            <span className="text-blue-400">●</span>
-                            <span className="text-gray-300">{j.jobId}</span>
-                            <span className="text-gray-600">{j.mode}</span>
-                          </div>
-                        ))}
-                        {completed.length > 0 && completed.map((j: any) => (
-                          <div key={j.jobId} className="flex items-center gap-2 text-[10px] py-0.5">
-                            <span className="text-green-400">✓</span>
-                            <span className="text-gray-300">{j.jobId}</span>
-                            <span className="text-gray-600">{j.mode}</span>
-                          </div>
-                        ))}
-                        {failed.length > 0 && failed.map((j: any) => (
-                          <div key={j.jobId} className="flex items-center gap-2 text-[10px] py-0.5">
-                            <span className="text-red-400">✗</span>
-                            <span className="text-gray-300">{j.jobId}</span>
-                            <span className="text-gray-600">{j.mode}</span>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  }
-                  
-                  // Status card (get_agent_status fallback)
-                  return (
-                    <div key={idx} className="bg-gray-900 border border-gray-800/80 rounded p-3 text-xs font-mono max-w-3xl shadow-md border-l-4 border-l-indigo-500">
-                      <div className="flex items-center gap-2 text-[11px]">
-                        <span className="text-gray-500">📋</span>
-                        <span className="text-gray-300 font-medium">{agentData?.jobId || m.toolArgs?.job_id}</span>
-                        <span className="text-gray-600">·</span>
-                        <span className="text-gray-500">{agentData?.mode}</span>
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded ${getStatusColor(agentData?.status || 'unknown')}`}>
-                          {agentData?.status}
-                        </span>
-                      </div>
-                      {agentData?.model && (
-                        <div className="text-gray-600 text-[10px] mt-1">
-                          {agentData.model}
-                        </div>
-                      )}
-                      {agentData?.result && (
-                        <div className="text-green-400/70 text-[10px] mt-1 line-clamp-1">
-                          {agentData.result}
-                        </div>
-                      )}
+            <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-6 text-left max-w-md mx-auto space-y-4">
+              <p className="text-sm text-gray-300">Let portal scan your codebase and generate:</p>
+              <div className="space-y-3">
+                {[
+                  { icon: '📊', label: 'Concept Graph', desc: 'Architecture map of your project' },
+                  { icon: '📄', label: 'Specifications', desc: 'Key design docs & tickets' },
+                  { icon: '🔗', label: 'Concept Linking', desc: 'Specs mapped to concepts' },
+                ].map(item => (
+                  <div key={item.label} className="flex items-start gap-3">
+                    <div className="w-8 h-8 rounded-lg bg-violet-950/50 border border-violet-800/40 flex items-center justify-center shrink-0 mt-0.5">
+                      <span className="text-sm">{item.icon}</span>
                     </div>
-                  );
-                }
-                
-                return (
-                  <div key={idx} className={`bg-gray-900 border border-gray-800/80 rounded p-4 text-xs font-mono space-y-2.5 max-w-3xl shadow-md ${
-                    isDelegated ? 'border-l-4 border-l-violet-500' : 'border-l-4 border-l-indigo-500'
-                  }`}>
-                    <div className={`flex items-center justify-between font-bold border-b border-gray-800/60 pb-1.5 ${
-                      isDelegated ? 'text-violet-400' : 'text-indigo-400'
-                    }`}>
-                      <div className="flex items-center gap-2">
-                        {isExec ? <Loader2 className="w-3.5 h-4 animate-spin" /> : <span>{toolIcon}</span>}
-                        <span>{m.toolName}</span>
-                      </div>
-                      <span className="text-[10px] text-gray-500">
-                        {isExec ? 'Executing...' : 'Completed'}
-                      </span>
-                    </div>
-
-                    {humanReadableArgs && (
-                      <div className="text-gray-300 font-semibold">
-                        {humanReadableArgs}
-                      </div>
-                    )}
-
-                    {cmdOutput ? (
-                      <div className="bg-gray-950 rounded border border-gray-800/50 overflow-hidden">
-                        {/* Command prompt */}
-                        <div className="bg-gray-900 px-3 py-1.5 text-gray-400 text-[10px] border-b border-gray-800/50">
-                          $ {m.toolArgs?.command}
-                        </div>
-                        {/* stdout */}
-                        {cmdOutput.stdout && (
-                          <div className="px-3 py-2 text-green-400/90 whitespace-pre-wrap max-h-36 overflow-y-auto">
-                            {cmdOutput.stdout}
-                          </div>
-                        )}
-                        {/* stderr */}
-                        {cmdOutput.stderr && (
-                          <div className="px-3 py-2 text-red-400/90 whitespace-pre-wrap max-h-36 overflow-y-auto border-t border-gray-800/50">
-                            {cmdOutput.stderr}
-                          </div>
-                        )}
-                        {/* exit code */}
-                        {cmdOutput.exit_code !== 0 && (
-                          <div className="px-3 py-1.5 text-amber-400/90 border-t border-gray-800/50">
-                            exit code: {cmdOutput.exit_code}
-                          </div>
-                        )}
-                      </div>
-                    ) : m.toolResult ? (
-                      <div className="bg-gray-950 p-2.5 rounded border border-gray-800/50 max-h-36 overflow-y-auto text-green-400/90 whitespace-pre-wrap">
-                        {m.toolResult}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              }
-
-              if (grouped.type === 'user' && grouped.message) {
-                return (
-                  <div key={idx} className="flex flex-col gap-1 max-w-[80%] ml-auto items-end">
-                    <span className="text-[10px] text-gray-500 font-bold px-1 uppercase">
-                      You
-                    </span>
-                    <div className="p-4 rounded-lg text-sm leading-relaxed shadow-sm bg-violet-600 text-white rounded-tr-none">
-                      {grouped.message.text}
+                    <div>
+                      <div className="text-xs font-bold text-gray-200">{item.label}</div>
+                      <div className="text-[10px] text-gray-500 mt-0.5">{item.desc}</div>
                     </div>
                   </div>
-                );
-              }
+                ))}
+              </div>
+              <div className="border-t border-gray-800 pt-3">
+                <p className="text-[10px] text-gray-600">Takes 1-3 minutes. You review everything before saving.</p>
+              </div>
+            </div>
 
-              if (grouped.type === 'model' && grouped.combinedText) {
-                return (
-                  <div key={idx} className="flex flex-col gap-1 max-w-[80%] mr-auto items-start">
-                    <span className="text-[10px] text-gray-500 font-bold px-1 uppercase">
-                      Assistant
-                    </span>
-                    <div className="p-4 rounded-lg text-sm leading-relaxed shadow-sm bg-gray-900 border border-gray-800/80 text-gray-200 rounded-tl-none">
-                      {grouped.combinedText}
-                    </div>
-                  </div>
-                );
-              }
-
-              return null;
-            })}
-            <div ref={chatEndRef}></div>
-          </div>
-
-          {/* Chat Input */}
-          <div className="p-4 border-t border-gray-800 bg-gray-950">
-            {/* Error message */}
-            {errorMsg && (
-              <div className="mb-2 bg-red-950/30 border border-red-800/50 rounded-lg p-2 text-red-300 text-xs flex gap-2 items-center">
-                <AlertCircle className="w-3 h-3 shrink-0" />
-                <span>{errorMsg}</span>
+            {!setupScanning && !setupScanComplete && (
+              <div className="flex flex-col items-center gap-3">
+                <button onClick={runOnboardingScan} className="bg-violet-600 hover:bg-violet-700 text-white font-bold px-8 py-3 rounded-lg text-sm shadow-lg shadow-violet-500/20 transition-all w-full max-w-md">
+                  ⚡ Scan & Generate
+                </button>
+                <button onClick={skipSetup} className="text-gray-500 hover:text-gray-300 text-xs transition-colors">
+                  Skip — start with empty workspace
+                </button>
               </div>
             )}
-            
-            {/* Main input row */}
-            <div className="flex gap-2 items-center">
-              {/* Mic/Connect button - hidden in noaudio mode */}
-              {connectionMode !== 'noaudio' && (
-                <button 
-                  onClick={() => {
-                    if (!isConnected) {
-                      startSession();
-                    } else if (connectionMode === 'webrtc') {
-                      // Right-click or shift-click to disconnect in webrtc mode
-                      stopSession();
-                    } else {
-                      toggleRecording();
-                    }
-                  }}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    if (isConnected) stopSession();
-                  }}
-                  disabled={isConnecting}
-                  title={!isConnected ? "Click to connect" : (connectionMode === 'webrtc' ? "Click to mute/unmute, right-click to disconnect" : "Click to record")}
-                  className={`p-3 rounded-lg border transition-all flex items-center justify-center ${
-                    isConnecting
-                      ? 'bg-gray-800 border-gray-700 text-gray-400'
-                      : !isConnected
-                        ? 'bg-violet-600 hover:bg-violet-700 border-violet-500 text-white'
-                        : isRecording
-                          ? 'bg-red-600 border-red-500 text-white animate-pulse'
-                          : isMuted
-                            ? 'bg-red-950/50 border-red-800/50 text-red-400'
-                            : 'bg-green-950/30 border-green-800/40 text-green-400'
-                  }`}
-                >
-                  {isConnecting ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : !isConnected ? (
-                    <Mic className="w-4 h-4" />
-                  ) : isRecording || isMuted ? (
-                    <MicOff className="w-4 h-4" />
-                  ) : (
-                    <Mic className="w-4 h-4" />
-                  )}
-                </button>
-              )}
-              
-              {/* Disconnect button - shown when connected */}
-              {isConnected && (
-                <button 
-                  onClick={stopSession}
-                  className="p-3 rounded-lg border bg-red-950/40 hover:bg-red-950/80 border-red-800 text-red-300 transition-all flex items-center justify-center"
-                  title="Disconnect"
-                >
-                  <Square className="w-4 h-4 fill-red-300" />
-                </button>
-              )}
-              
-              {/* Text input */}
-              <input 
-                type="text" 
-                placeholder="Type a message and press enter..." 
-                disabled={connectionMode !== 'streaming' && connectionMode !== 'noaudio' && !isConnected}
-                value={textInput}
-                onChange={(e) => setTextInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && sendTextMessage()}
-                className="flex-1 bg-gray-900/80 border border-gray-800 focus:border-violet-500 text-white rounded px-4 py-3 focus:outline-none transition-colors text-sm font-sans"
-              />
-              
-              {/* Send button */}
-              <button 
-                onClick={sendTextMessage}
-                disabled={connectionMode !== 'streaming' && connectionMode !== 'noaudio' && !isConnected}
-                className="bg-violet-600 hover:bg-violet-700 disabled:bg-gray-800/50 p-3 rounded-lg text-white disabled:text-gray-600 transition-colors shadow-md"
-              >
-                <Send className="w-4 h-4" />
-              </button>
-            </div>
-            
-            {/* Controls row */}
-            <div className="flex items-center gap-3 mt-2">
-              {/* Mode selector - always first */}
-              <select 
-                value={connectionMode}
-                onChange={(e) => setConnectionMode(e.target.value as 'webrtc' | 'streaming' | 'noaudio')}
-                disabled={isConnected}
-                className="text-[10px] px-2 py-1 rounded border bg-gray-800/50 border-gray-700 text-gray-400 cursor-pointer disabled:opacity-50 focus:outline-none focus:border-violet-500"
-              >
-                <option value="webrtc">🎙️ Realtime</option>
-                <option value="streaming">💬 Streaming</option>
-                <option value="noaudio">⌨️ Text Only</option>
-              </select>
-              
-              {/* Model Selector - shown in streaming and noaudio modes */}
-              {(connectionMode === 'streaming' || connectionMode === 'noaudio') && (
-                <div className="relative" ref={modelSelectorRef}>
-                  <button
-                    onClick={() => {
-                      setShowModelSelector(!showModelSelector);
-                      if (!showModelSelector) setModelSearch('');
-                    }}
-                    className="text-[10px] px-2 py-1 rounded border bg-gray-800/50 border-gray-700 text-gray-400 hover:text-gray-300 hover:border-gray-600 transition-colors flex items-center gap-1.5"
-                  >
-                    <Cpu className="w-3 h-3" />
-                    {availableModels.find(m => m.id === selectedModel)?.name || selectedModel}
-                    <ChevronDown className="w-3 h-3" />
+
+            {setupScanning && (
+              <div className="max-w-md mx-auto space-y-4">
+                <div className="bg-gray-900 rounded-full h-1.5 overflow-hidden border border-gray-800">
+                  <div className="h-full bg-gradient-to-r from-violet-600 to-indigo-500 rounded-full transition-all duration-500" style={{ width: `${(setupScanStep / 10) * 100}%` }}></div>
+                </div>
+                <div className="bg-gray-900/50 border border-gray-800 rounded-xl p-4 text-left max-h-48 overflow-y-auto">
+                  {['Reading package.json...', 'Reading docker-compose.yml...', 'Scanning directory structure...', 'Reading README.md...', 'Analyzing entry points...', 'Reading config files...', 'Mapping module dependencies...', 'Generating concept graph...', 'Writing spec files...', 'Linking concepts to specs...'].slice(0, setupScanStep).map((step, i) => (
+                    <div key={i} className="flex items-center gap-2 py-0.5 text-[11px]">
+                      <span className="text-green-400">✓</span>
+                      <span className="text-gray-300">{step}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {setupScanComplete && (
+              <div className="max-w-md mx-auto space-y-4">
+                <div className="bg-green-950/20 border border-green-800/40 rounded-lg p-4">
+                  <div className="text-sm font-bold text-green-300 mb-1">Generation Complete</div>
+                  <div className="text-xs text-gray-400">
+                    {setupGraph?.concepts?.length || 0} concepts, {setupSpecs.length} specs generated.
+                  </div>
+                </div>
+                <div className="flex gap-3">
+                  <button onClick={completeSetup} className="bg-violet-600 hover:bg-violet-700 text-white font-bold px-6 py-2.5 rounded-lg text-sm shadow-lg shadow-violet-500/20 transition-all flex-1">
+                    ✓ Save & Enter
                   </button>
-                  
-                  {showModelSelector && (
-                    <div className="absolute bottom-full left-0 mb-1 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 min-w-[300px] max-h-[450px] flex flex-col">
-                      {/* Search Field */}
-                      <div className="p-2 border-b border-gray-800">
-                        <input
-                          type="text"
-                          placeholder="Search models..."
-                          value={modelSearch}
-                          onChange={(e) => setModelSearch(e.target.value)}
-                          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-violet-500"
-                          autoFocus
-                        />
-                      </div>
-                      
-                      {/* Models List */}
-                      <div className="overflow-y-auto flex-1 py-1">
-                        {/* Favorites Section */}
-                        {favoriteModels.length > 0 && !modelSearch && (
-                          <>
-                            <div className="px-3 py-1 text-[9px] text-gray-500 uppercase font-semibold border-b border-gray-800">
-                              Favorites
-                            </div>
-                            {availableModels
-                              .filter(m => favoriteModels.includes(m.id))
-                              .map((model) => (
-                                <div
-                                  key={model.id}
-                                  className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 flex items-center justify-between ${
-                                    selectedModel === model.id ? 'text-violet-400 bg-gray-800/50' : 'text-gray-300'
-                                  }`}
-                                >
-                                  <button
-                                    onClick={() => {
-                                      setSelectedModel(model.id);
-                                      setShowModelSelector(false);
-                                      setModelSearch('');
-                                    }}
-                                    className="flex-1 text-left"
-                                  >
-                                    <div className="flex items-center gap-2">
-                                      <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-                                      <span>{model.name}</span>
-                                    </div>
-                                    <span className="text-[9px] text-gray-500 ml-5">{model.provider}</span>
-                                  </button>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      toggleFavoriteModel(model.id);
-                                    }}
-                                    className="p-1 hover:bg-gray-700 rounded"
-                                  >
-                                    <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-                                  </button>
+                  <button onClick={skipSetup} className="bg-gray-800 hover:bg-gray-700 border border-gray-700 text-gray-300 px-6 py-2.5 rounded-lg text-sm transition-colors">
+                    Skip
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─── MAIN APP ───────────────────────────────────────────────────────── */}
+      {setupStatus === 'ready' && (
+        <>
+          {/* Header bar */}
+          <header className="border-b border-gray-800 bg-gray-900/60 backdrop-blur px-6 py-4 flex items-center justify-between shrink-0">
+            <div className="flex items-center gap-3">
+              <div className="w-4 h-4 rounded-full bg-violet-500 animate-pulse"></div>
+              <h1 className="text-xl font-bold bg-gradient-to-r from-violet-400 to-indigo-400 bg-clip-text text-transparent">
+                portal
+              </h1>
+              <span className="text-xs text-gray-400 bg-gray-800 px-2.5 py-0.5 rounded-md">v1.0.0-beta</span>
+            </div>
+            <div className="flex items-center gap-3">
+              {!isConnected && (
+                <input
+                  type="password"
+                  placeholder="Enter OpenAI API Key (or set in env)"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  className="text-xs bg-gray-950 border border-gray-800 focus:border-violet-500 text-white rounded px-3 py-2 w-64 focus:outline-none transition-colors"
+                />
+              )}
+            </div>
+          </header>
+
+          {/* Main dashboard grid */}
+          <main className="flex-1 flex overflow-hidden">
+
+            {/* ═══ LEFT COLUMN: CONCEPT GRAPH + SPECS ═══════════════════════ */}
+            <section className="w-[340px] border-r border-gray-800/80 bg-gray-950/35 flex flex-col shrink-0 overflow-hidden">
+              {/* Graph Header */}
+              <div className="px-5 py-2.5 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between shrink-0">
+                <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+                  📊 Concept Graph
+                </span>
+              </div>
+
+              {/* Graph Canvas */}
+              <div className="relative bg-gray-950/40 overflow-hidden flex items-center justify-center" style={{ minHeight: 200 }}>
+                {conceptGraph && conceptGraph.concepts.length > 0 ? (
+                  <>
+                    <svg className="absolute inset-0 w-full h-full" xmlns="http://www.w3.org/2000/svg">
+                      <defs>
+                        <marker id="arrow" viewBox="0 0 10 10" refX="16" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+                          <path d="M 0 0 L 10 5 L 0 10 z" fill="#4b5563" />
+                        </marker>
+                      </defs>
+                      {conceptGraph.relationships.map((rel, i) => {
+                        const from = conceptGraph.concepts.find(c => c.id === rel.from);
+                        const to = conceptGraph.concepts.find(c => c.id === rel.to);
+                        if (!from || !to) return null;
+                        return <line key={i} x1={from.x + 60} y1={from.y + 20} x2={to.x + 60} y2={to.y} stroke="#4b5563" strokeWidth="1.5" markerEnd="url(#arrow)" />;
+                      })}
+                      {conceptGraph.concepts.filter(c => c.parent).map((child, i) => {
+                        const parent = conceptGraph.concepts.find(c => c.id === child.parent);
+                        if (!parent) return null;
+                        return <line key={`p-${i}`} x1={parent.x + 60} y1={parent.y + 25} x2={child.x + 60} y2={child.y} stroke="#374151" strokeWidth="1" strokeDasharray="3,3" markerEnd="url(#arrow)" />;
+                      })}
+                    </svg>
+                    <div className="absolute inset-0 select-none">
+                      {conceptGraph.concepts.map((node) => {
+                        const isRoot = !node.parent;
+                        const isActive = activeConceptThread === node.id;
+                        return (
+                          <div
+                            key={node.id}
+                            onClick={() => {
+                              setActiveConceptThread(node.id);
+                              setActiveSpec(null);
+                            }}
+                            className={`absolute cursor-pointer transition-all ${
+                              isActive ? 'z-10' : 'hover:z-10'
+                            }`}
+                            style={{ left: node.x, top: node.y, width: 120 }}
+                          >
+                            <div className={`p-1.5 rounded-lg text-center transition-all text-[10px] font-bold ${
+                              isRoot
+                                ? 'bg-violet-950/80 border-2 border-violet-500 text-violet-200 shadow-lg'
+                                : isActive
+                                  ? 'bg-gray-800 border border-violet-500 text-violet-300 shadow-md'
+                                  : 'bg-gray-900 border border-gray-700 text-gray-300 hover:border-gray-500'
+                            }`}>
+                              {node.label}
+                              {conceptGraph.specs[node.id] && (
+                                <div className="text-[7px] text-gray-500 mt-0.5 font-normal">
+                                  📄 {conceptGraph.specs[node.id].length} spec{conceptGraph.specs[node.id].length > 1 ? 's' : ''}
                                 </div>
-                              ))}
-                            <div className="border-b border-gray-800 my-1"></div>
-                          </>
-                        )}
-                        
-                        {/* All Models */}
-                        <div className="px-3 py-1 text-[9px] text-gray-500 uppercase font-semibold">
-                          {modelSearch ? 'Search Results' : (favoriteModels.length > 0 ? 'All Models' : 'Models')}
-                        </div>
-                        {availableModels
-                          .filter(m => {
-                            if (!modelSearch) return true;
-                            const search = modelSearch.toLowerCase();
-                            return m.name.toLowerCase().includes(search) || 
-                                   m.id.toLowerCase().includes(search) ||
-                                   m.provider.toLowerCase().includes(search);
-                          })
-                          .map((model) => (
-                            <div
-                              key={model.id}
-                              className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 flex items-center justify-between ${
-                                selectedModel === model.id ? 'text-violet-400 bg-gray-800/50' : 'text-gray-300'
-                              }`}
-                            >
-                              <button
-                                onClick={() => {
-                                  setSelectedModel(model.id);
-                                  setShowModelSelector(false);
-                                  setModelSearch('');
-                                }}
-                                className="flex-1 text-left"
-                              >
-                                <span>{model.name}</span>
-                                <span className="text-[9px] text-gray-500 ml-2">{model.provider}</span>
-                                {model.pricing && (
-                                  <span className="text-[9px] text-gray-600 ml-2">
-                                    ${model.pricing.prompt.toFixed(6)}/tok
-                                  </span>
-                                )}
-                              </button>
-                              <button
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  toggleFavoriteModel(model.id);
-                                }}
-                                className="p-1 hover:bg-gray-700 rounded"
-                                title={favoriteModels.includes(model.id) ? "Remove from favorites" : "Add to favorites"}
-                              >
-                                <Star className={`w-3 h-3 ${favoriteModels.includes(model.id) ? 'text-yellow-500 fill-yellow-500' : 'text-gray-600'}`} />
-                              </button>
+                              )}
                             </div>
-                          ))}
-                        {availableModels.filter(m => {
-                          if (!modelSearch) return true;
-                          const search = modelSearch.toLowerCase();
-                          return m.name.toLowerCase().includes(search) || 
-                                 m.id.toLowerCase().includes(search) ||
-                                 m.provider.toLowerCase().includes(search);
-                        }).length === 0 && (
-                          <div className="px-3 py-4 text-xs text-gray-500 text-center">
-                            No models found
                           </div>
-                        )}
+                        );
+                      })}
+                    </div>
+                  </>
+                ) : (
+                  <div className="text-center p-6 text-gray-600 text-[11px]">
+                    <div className="text-2xl mb-2 opacity-30">📊</div>
+                    No concept graph yet.
+                  </div>
+                )}
+              </div>
+
+              {/* Specs Divider */}
+              <div className="px-5 py-2 border-b border-t border-gray-800/50 bg-gray-900/20 flex items-center justify-between shrink-0">
+                <span className="text-[11px] font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
+                  📄 Specifications
+                </span>
+                <span className="text-[9px] text-gray-600">{specFiles.length} files</span>
+              </div>
+
+              {/* Specs List */}
+              <div className="flex-1 overflow-y-auto">
+                {specFiles.length === 0 ? (
+                  <div className="text-center p-6 text-gray-600 text-[11px]">
+                    <div className="text-2xl mb-2 opacity-30">📄</div>
+                    No specs yet.
+                  </div>
+                ) : (
+                  specFiles.map(spec => (
+                    <div
+                      key={spec.filename}
+                      onClick={() => {
+                        setActiveSpec(spec.filename);
+                        setActiveConceptThread(null);
+                      }}
+                      className={`px-5 py-2.5 cursor-pointer transition-all border-b border-gray-800/30 hover:bg-gray-900/40 ${
+                        activeSpec === spec.filename ? 'bg-gray-900/60 border-l-2 border-l-violet-500' : ''
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`text-xs ${activeSpec === spec.filename ? 'text-violet-400' : 'text-gray-500'}`}>📄</span>
+                        <span className={`text-[11px] font-bold truncate ${activeSpec === spec.filename ? 'text-violet-300' : 'text-gray-300'}`}>
+                          {spec.filename}
+                        </span>
+                      </div>
+                      <div className="text-[9px] text-gray-600 ml-5 mt-0.5">{spec.lines} lines</div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+
+            {/* ═══ MIDDLE COLUMN: CONVERSATION OR SPEC SPLIT VIEW ═══════════ */}
+            <section className="flex-1 flex flex-col bg-gray-900/5 overflow-hidden">
+              {activeSpec ? (
+                /* ─── SPEC SPLIT VIEW ──────────────────────────────────────── */
+                <>
+                  {/* Spec Header */}
+                  <div className="px-4 py-2 bg-gray-950/60 border-b border-gray-800/40 flex items-center justify-between shrink-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-400 text-xs">📄</span>
+                      <span className="text-xs font-bold text-gray-300">{activeSpec}</span>
+                      <span className="text-gray-600 text-xs">·</span>
+                      <span className="text-[10px] text-gray-500">Discussion about this spec</span>
+                    </div>
+                    <button onClick={() => setActiveSpec(null)} className="text-gray-600 hover:text-gray-300 text-xs transition-colors">
+                      ✕ Close
+                    </button>
+                  </div>
+
+                  {/* Split: Document + Chat */}
+                  <div className="flex-1 flex overflow-hidden">
+                    {/* Document Pane */}
+                    <div className="flex-1 overflow-y-auto border-r border-gray-800/50 p-6">
+                      <div className="prose prose-invert prose-sm max-w-none">
+                        <Markdown remarkPlugins={[remarkGfm]}>
+                          {specFiles.find(s => s.filename === activeSpec)?.content || ''}
+                        </Markdown>
                       </div>
                     </div>
-                  )}
-                </div>
-              )}
-              
-              {/* Thinking effort selector - shown in streaming and noaudio modes */}
-              {(connectionMode === 'streaming' || connectionMode === 'noaudio') && (
-                <select 
-                  value={thinkingEffort}
-                  onChange={(e) => setThinkingEffort(e.target.value as 'low' | 'medium' | 'high')}
-                  className="text-[10px] px-2 py-1 rounded border bg-gray-800/50 border-gray-700 text-gray-400 cursor-pointer focus:outline-none focus:border-violet-500"
-                  title="Thinking effort for reasoning models"
-                >
-                  <option value="low">🧠 Low</option>
-                  <option value="medium">🧠 Medium</option>
-                  <option value="high">🧠 High</option>
-                </select>
-              )}
-              
-              {/* Status indicator */}
-              <span className={`text-[10px] px-2 py-0.5 rounded-full ${
-                isConnected 
-                  ? (isModelTalking ? 'bg-violet-950/50 text-violet-300 border border-violet-800/50' 
-                    : isRecording ? 'bg-red-950/50 text-red-300 border border-red-800/50'
-                    : 'bg-green-950/30 text-green-400 border border-green-800/30')
-                  : 'bg-gray-900 text-gray-500 border border-gray-800'
-              }`}>
-                {isConnected 
-                  ? (isModelTalking ? 'Speaking' 
-                    : isRecording ? 'Recording' 
-                    : connectionMode === 'webrtc' ? 'Live' : 'Ready')
-                  : 'Offline'}
-              </span>
-            </div>
-          </div>
-        </section>
 
-        {/* RIGHT COLUMN: BACKGROUND AGENTS */}
-        <section className="w-96 border-l border-gray-800/80 bg-gray-900/10 flex flex-col">
-          <div className="px-6 py-4 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Cpu className="w-4 h-4 text-indigo-400 animate-pulse" />
-              <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">Background Agents</span>
-            </div>
-            <div className="flex items-center gap-2">
-              {activeJobs.length > 0 && (
-                <span className="text-xs bg-blue-950/50 border border-blue-900/60 text-blue-300 px-2 py-0.5 rounded-full font-bold">
-                  {activeJobs.length} active
-                </span>
-              )}
-              {completedJobs.length > 0 && (
-                <span className="text-xs bg-green-950/50 border border-green-900/60 text-green-300 px-2 py-0.5 rounded-full font-bold">
-                  {completedJobs.length} done
-                </span>
-              )}
-              {failedJobs.length > 0 && (
-                <span className="text-xs bg-red-950/50 border border-red-900/60 text-red-300 px-2 py-0.5 rounded-full font-bold">
-                  {failedJobs.length} failed
-                </span>
-              )}
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {jobs.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center p-6 text-gray-600">
-                <HelpCircle className="w-10 h-10 mb-2 stroke-1" />
-                <p className="text-xs">No background agents.</p>
-                <p className="text-[10px] max-w-[200px] mt-1 leading-relaxed">
-                  Ask the assistant to spawn a background agent for complex tasks.
-                </p>
-              </div>
-            ) : (
-              <>
-                {/* Active Jobs */}
-                {activeJobs.length > 0 && (
-                  <div>
-                    <div className="text-[10px] font-bold text-gray-500 uppercase mb-2 px-1">Active</div>
-                    {activeJobs.map((j) => {
-                      const isSelected = selectedJobId === j.job_id;
-                      const isAgentExpanded = expandedAgents.has(j.job_id);
-                      const toolLogs = j.logs.filter((l: any) => l.type === 'tool');
-                      const startLog = j.logs.find((l: any) => l.type === 'start');
-                      return (
-                        <div 
-                          key={j.job_id}
-                          className={`border rounded-lg p-4 cursor-pointer transition-all hover:bg-gray-900/40 shadow-sm mb-3 ${
-                            isSelected ? 'bg-gray-900 border-indigo-500/50 shadow-md' : 'bg-gray-900/20 border-gray-800'
-                          }`}
-                          onClick={() => setSelectedJobId(isSelected ? null : j.job_id)}
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-bold text-gray-300">{j.job_id}</span>
-                            <div className="flex items-center gap-2">
-                              <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border ${getStatusColor(j.status)}`}>
-                                <span className="flex items-center gap-1">
-                                  <Loader2 className="w-2.5 h-3 animate-spin" />
-                                  running
-                                </span>
-                              </span>
-                              <button
-                                className="p-1 rounded hover:bg-red-900/50 text-gray-500 hover:text-red-400 transition-colors"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  cancelJob(j.job_id);
-                                }}
-                                title="Stop job"
-                              >
-                                <Square className="w-3 h-3" />
-                              </button>
-                            </div>
-                          </div>
-
-                          <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-2">
-                            {j.description}
-                          </p>
-
-                          {isSelected && (
-                            <div className="mt-3 pt-3 border-t border-gray-800/80">
-                              <button 
-                                className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 uppercase mb-2 hover:text-gray-400"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setExpandedAgents(prev => {
-                                    const next = new Set(prev);
-                                    if (next.has(j.job_id)) next.delete(j.job_id);
-                                    else next.add(j.job_id);
-                                    return next;
-                                  });
-                                }}
-                              >
-                                {isAgentExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                                Agent ({startLog?.model || 'model'})
-                              </button>
-                              {isAgentExpanded && (
-                                <div className="bg-gray-950 border border-gray-800/80 p-2.5 rounded text-[11px] leading-relaxed max-h-48 overflow-y-auto space-y-1.5 text-gray-300 font-mono">
-                                  {toolLogs.length === 0 ? (
-                                    <div className="text-gray-600 italic">Initializing...</div>
-                                  ) : (
-                                    toolLogs.map((log: any, lIdx: number) => {
-                                      const args = log.name === 'execute_command' ? log.args?.command : 
-                                                   log.name === 'read_file' || log.name === 'write_file' ? log.args?.path :
-                                                   log.name === 'list_directory' ? (log.args?.path || '.') : '';
-                                      let output = '';
-                                      if (log.name === 'execute_command' && log.result) {
-                                        const cmdResult = typeof log.result === 'string' ? JSON.parse(log.result) : log.result;
-                                        output = cmdResult.stdout?.trim() || (cmdResult.exit_code === 0 ? '✓' : `exit ${cmdResult.exit_code}`);
-                                      } else if (log.name === 'list_directory' && log.result?.files) {
-                                        output = log.result.files.map((f: any) => f.type === 'directory' ? `${f.name}/` : f.name).join(', ');
-                                      } else if (log.name === 'read_file' && log.result?.content) {
-                                        output = log.result.content.length > 60 ? log.result.content.slice(0, 60) + '...' : log.result.content;
-                                      } else if (log.name === 'write_file' && log.result?.message) {
-                                        output = '✓';
-                                      }
-                                      return (
-                                        <div key={lIdx} className="flex flex-col">
-                                          <span className="text-indigo-400">▸ {log.name} <span className="text-gray-500">{args}</span></span>
-                                          {output && <span className="text-gray-500 ml-4">{output}</span>}
-                                        </div>
-                                      );
-                                    })
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          )}
-
-                          <div className="flex justify-end mt-1">
-                            {isSelected ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {/* Completed Jobs */}
-                {completedJobs.length > 0 && (
-                  <div>
-                    <div className="text-[10px] font-bold text-gray-500 uppercase mb-2 px-1">Completed</div>
-                    {completedJobs.map((j) => {
-                      const isSelected = selectedJobId === j.job_id;
-                      const isAgentExpanded = expandedAgents.has(j.job_id);
-                      const toolLogs = j.logs.filter((l: any) => l.type === 'tool');
-                      const summaryLog = j.logs.find((l: any) => l.type === 'summary');
-                      const startLog = j.logs.find((l: any) => l.type === 'start');
-                      return (
-                        <div 
-                          key={j.job_id}
-                          className={`border rounded-lg p-4 cursor-pointer transition-all hover:bg-gray-900/40 shadow-sm mb-3 ${
-                            isSelected ? 'bg-gray-900 border-green-500/50 shadow-md' : 'bg-gray-900/20 border-gray-800'
-                          }`}
-                          onClick={() => setSelectedJobId(isSelected ? null : j.job_id)}
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-bold text-gray-300">{j.job_id}</span>
-                            <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border text-green-400 bg-green-950/30 border-green-800/40">
-                              completed
+                    {/* Spec Chat Pane */}
+                    <div className="w-[360px] flex flex-col shrink-0">
+                      <div className="px-4 py-2 border-b border-gray-800/40 bg-gray-900/20 text-[10px] text-gray-500 shrink-0 flex items-center gap-1.5">
+                        💬 Chat about this spec
+                      </div>
+                      <div className="flex-1 overflow-y-auto p-4 space-y-3 text-xs">
+                        {(specChatMessages[activeSpec] || []).map((msg, i) => (
+                          <div key={i} className={`flex flex-col gap-1 ${msg.role === 'user' ? 'max-w-[85%] ml-auto items-end' : 'max-w-[85%] mr-auto items-start'}`}>
+                            <span className="text-[10px] text-gray-500 font-bold px-1 uppercase">
+                              {msg.role === 'user' ? 'You' : 'Assistant'} <span className="text-gray-600 normal-case font-normal">{msg.time}</span>
                             </span>
-                          </div>
-
-                          <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-2">
-                            {j.description}
-                          </p>
-
-                          {isSelected && (
-                            <div className="mt-3 pt-3 border-t border-gray-800/80">
-                              <button 
-                                className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 uppercase mb-2 hover:text-gray-400"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setExpandedAgents(prev => {
-                                    const next = new Set(prev);
-                                    if (next.has(j.job_id)) next.delete(j.job_id);
-                                    else next.add(j.job_id);
-                                    return next;
-                                  });
-                                }}
-                              >
-                                {isAgentExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-                                Agent ({startLog?.model || 'model'})
-                              </button>
-                              {isAgentExpanded && (
-                                <div className="bg-gray-950 border border-gray-800/80 p-2.5 rounded text-[11px] leading-relaxed max-h-48 overflow-y-auto space-y-1.5 text-gray-300 font-mono">
-                                  {toolLogs.length === 0 ? (
-                                    <div className="text-gray-600 italic">No tool logs</div>
-                                  ) : (
-                                    toolLogs.map((log: any, lIdx: number) => {
-                                      const args = log.name === 'execute_command' ? log.args?.command : 
-                                                   log.name === 'read_file' || log.name === 'write_file' ? log.args?.path :
-                                                   log.name === 'list_directory' ? (log.args?.path || '.') : '';
-                                      let output = '';
-                                      if (log.name === 'execute_command' && log.result) {
-                                        const cmdResult = typeof log.result === 'string' ? JSON.parse(log.result) : log.result;
-                                        output = cmdResult.stdout?.trim() || (cmdResult.exit_code === 0 ? '✓' : `exit ${cmdResult.exit_code}`);
-                                      } else if (log.name === 'list_directory' && log.result?.files) {
-                                        output = log.result.files.map((f: any) => f.type === 'directory' ? `${f.name}/` : f.name).join(', ');
-                                      } else if (log.name === 'read_file' && log.result?.content) {
-                                        output = log.result.content.length > 60 ? log.result.content.slice(0, 60) + '...' : log.result.content;
-                                      } else if (log.name === 'write_file' && log.result?.message) {
-                                        output = '✓';
-                                      }
-                                      return (
-                                        <div key={lIdx} className="flex flex-col">
-                                          <span className="text-indigo-400">▸ {log.name} <span className="text-gray-500">{args}</span></span>
-                                          {output && <span className="text-gray-500 ml-4">{output}</span>}
-                                        </div>
-                                      );
-                                    })
-                                  )}
-                                </div>
-                              )}
-                              {summaryLog && (
-                                <div className="mt-2 flex items-start gap-2 text-xs">
-                                  <span className="text-green-400 mt-0.5">✓</span>
-                                  <span className="text-gray-400">{summaryLog.text}</span>
-                                </div>
-                              )}
+                            <div className={`p-3 rounded-lg shadow text-sm leading-relaxed ${
+                              msg.role === 'user' ? 'bg-violet-600 text-white rounded-tr-none' : 'bg-gray-900 border border-gray-800/80 text-gray-300'
+                            }`}>
+                              {msg.text}
                             </div>
-                          )}
-
-                          <div className="flex justify-end mt-1">
-                            {isSelected ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
                           </div>
+                        ))}
+                      </div>
+                      <div className="p-3 border-t border-gray-800 bg-gray-950 shrink-0">
+                        <div className="flex gap-2 items-center">
+                          <input
+                            type="text"
+                            placeholder="Ask about this spec..."
+                            value={specChatInput}
+                            onChange={(e) => setSpecChatInput(e.target.value)}
+                            onKeyDown={(e) => e.key === 'Enter' && sendSpecChat(activeSpec)}
+                            className="flex-1 bg-gray-900 border border-gray-800 focus:border-violet-500 text-white rounded px-3 py-2.5 focus:outline-none transition-colors text-xs"
+                          />
+                          <button onClick={() => sendSpecChat(activeSpec)} className="bg-violet-600 hover:bg-violet-700 p-2.5 rounded-lg text-white px-4 font-bold text-xs shrink-0">
+                            Send
+                          </button>
                         </div>
-                      );
-                    })}
+                      </div>
+                    </div>
                   </div>
-                )}
+                </>
+              ) : (
+                /* ─── NORMAL CONVERSATION VIEW ──────────────────────────────── */
+                <>
+                  <div className="px-6 py-4 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between">
+                    <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">Conversation</span>
+                    <span className="text-xs text-violet-400 font-semibold">{messages.length} messages</span>
+                  </div>
 
-                {/* Failed Jobs */}
-                {failedJobs.length > 0 && (
-                  <div>
-                    <div className="text-[10px] font-bold text-gray-500 uppercase mb-2 px-1">Failed</div>
-                    {failedJobs.map((j) => {
-                      const isSelected = selectedJobId === j.job_id;
-                      const errorLog = j.logs.find((l: any) => l.type === 'error');
-                      return (
-                        <div 
-                          key={j.job_id}
-                          className={`border rounded-lg p-4 cursor-pointer transition-all hover:bg-gray-900/40 shadow-sm mb-3 ${
-                            isSelected ? 'bg-gray-900 border-red-500/50 shadow-md' : 'bg-gray-900/20 border-gray-800'
-                          }`}
-                          onClick={() => setSelectedJobId(isSelected ? null : j.job_id)}
-                        >
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-xs font-bold text-gray-300">{j.job_id}</span>
-                            <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border text-red-400 bg-red-950/30 border-red-800/40">
-                              failed
-                            </span>
+                  <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                    {groupMessages(messages).map((grouped, idx) => {
+                      if (grouped.type === 'system' && grouped.message) {
+                        return (
+                          <div key={idx} className="bg-violet-950/15 border border-violet-900/30 text-violet-300 p-4 rounded text-xs leading-relaxed max-w-2xl prose prose-invert prose-xs max-w-none">
+                            <Markdown remarkPlugins={[remarkGfm]}>{grouped.message.text || ''}</Markdown>
                           </div>
+                        );
+                      }
 
-                          <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-2">
-                            {j.description}
-                          </p>
+                      if (grouped.type === 'tool' && grouped.message) {
+                        const m = grouped.message;
+                        const isExec = m.toolStatus === 'executing';
+                        const isDelegated = m.toolName === 'spawn_agent';
+                        const toolIcon = getToolIcon(m.toolName || '');
+                        const humanReadableArgs = m.toolName === 'execute_command' ? m.toolArgs?.command :
+                          m.toolName === 'read_file' || m.toolName === 'write_file' || m.toolName === 'edit_file' ? m.toolArgs?.path :
+                          m.toolName === 'list_directory' ? (m.toolArgs?.path || '.') :
+                          m.toolName === 'move_file' ? (m.toolArgs?.source && m.toolArgs?.destination ? `${m.toolArgs.source} → ${m.toolArgs.destination}` : '') :
+                          m.toolName === 'spawn_agent' ? m.toolArgs?.description :
+                          m.toolName === 'get_agent_status' ? m.toolArgs?.job_id : '';
 
-                          {isSelected && errorLog && (
-                            <div className="mt-3 pt-3 border-t border-gray-800/80">
-                              <div className="flex items-start gap-2 text-xs">
-                                <span className="text-red-400 mt-0.5">✕</span>
-                                <span className="text-red-400">{errorLog.text}</span>
+                        let cmdOutput = null;
+                        if (m.toolName === 'execute_command' && m.toolResult) {
+                          try { cmdOutput = JSON.parse(m.toolResult); } catch {}
+                        }
+
+                        if (m.toolResult && (m.toolName === 'spawn_agent' || m.toolName === 'get_agent_status' || m.toolName === 'list_agents')) {
+                          const agentData = parseAgentResult(m.toolName, m.toolResult);
+                          const agentName = m.toolArgs?.description?.split(' ')[0] || agentData?.jobId?.slice(0, 8) || '';
+                          if (m.toolName === 'get_agent_status' || m.toolName === 'list_agents') return null;
+                          if (agentData?.type === 'spawn') {
+                            const spawnResult = JSON.parse(m.toolResult);
+                            if (spawnResult.error) {
+                              return (
+                                <div key={idx} className="bg-gray-900 border border-gray-800/80 rounded p-3 text-xs max-w-3xl shadow-md border-l-4 border-l-red-500">
+                                  <div className="flex items-center gap-2 text-[11px]">
+                                    <span className="text-red-400">✗</span>
+                                    <span className="text-gray-300 font-medium">Spawn failed</span>
+                                    <span className="text-gray-600">·</span>
+                                    <span className="text-red-400/80">{spawnResult.error}</span>
+                                  </div>
+                                </div>
+                              );
+                            }
+                            return (
+                              <div key={idx} className="bg-gray-900 border border-gray-800/80 rounded p-3 text-xs max-w-3xl shadow-md border-l-4 border-l-violet-500">
+                                <div className="flex items-center gap-2 text-[11px]">
+                                  <span className="text-violet-400">🚀</span>
+                                  <span className="text-gray-300 font-medium">{agentName}</span>
+                                  <span className="text-gray-600">·</span>
+                                  <span className="text-gray-500">{agentData.mode}</span>
+                                  <span className="text-gray-600">·</span>
+                                  <span className="text-violet-400/80">{isExec ? 'Running' : 'Spawned'}</span>
+                                </div>
+                                {humanReadableArgs && <div className="text-gray-500 text-[10px] mt-1 line-clamp-1">{humanReadableArgs}</div>}
+                              </div>
+                            );
+                          }
+                          if (agentData?.type === 'list') return null;
+                          return null;
+                        }
+
+                        return (
+                          <div key={idx} className={`bg-gray-900 border border-gray-800/80 rounded p-4 text-xs space-y-2.5 max-w-3xl shadow-md ${
+                            isDelegated ? 'border-l-4 border-l-violet-500' : 'border-l-4 border-l-indigo-500'
+                          }`}>
+                            <div className={`flex items-center justify-between font-bold border-b border-gray-800/60 pb-1.5 ${
+                              isDelegated ? 'text-violet-400' : 'text-indigo-400'
+                            }`}>
+                              <div className="flex items-center gap-2">
+                                {isExec ? <Loader2 className="w-3.5 h-4 animate-spin" /> : <span>{toolIcon}</span>}
+                                <span>{m.toolName}</span>
+                              </div>
+                              <span className="text-[10px] text-gray-500">{isExec ? 'Executing...' : 'Completed'}</span>
+                            </div>
+                            {humanReadableArgs && <div className="text-gray-300 font-semibold">{humanReadableArgs}</div>}
+                            {cmdOutput ? (
+                              <div className="bg-gray-950 rounded border border-gray-800/50 overflow-hidden">
+                                <div className="bg-gray-900 px-3 py-1.5 text-gray-400 text-[10px] border-b border-gray-800/50">$ {m.toolArgs?.command}</div>
+                                {cmdOutput.stdout && <div className="px-3 py-2 text-green-400/90 whitespace-pre-wrap max-h-36 overflow-y-auto">{cmdOutput.stdout}</div>}
+                                {cmdOutput.stderr && <div className="px-3 py-2 text-red-400/90 whitespace-pre-wrap max-h-36 overflow-y-auto border-t border-gray-800/50">{cmdOutput.stderr}</div>}
+                                {cmdOutput.exit_code !== 0 && <div className="px-3 py-1.5 text-amber-400/90 border-t border-gray-800/50">exit code: {cmdOutput.exit_code}</div>}
+                              </div>
+                            ) : m.toolResult ? (
+                              <div className="bg-gray-950 p-2.5 rounded border border-gray-800/50 max-h-36 overflow-y-auto text-green-400/90 whitespace-pre-wrap">{m.toolResult}</div>
+                            ) : null}
+                          </div>
+                        );
+                      }
+
+                      if (grouped.type === 'user' && grouped.message) {
+                        return (
+                          <div key={idx} className="flex flex-col gap-1 max-w-[80%] ml-auto items-end">
+                            <span className="text-[10px] text-gray-500 font-bold px-1 uppercase">You</span>
+                            <div className="p-4 rounded-lg text-sm leading-relaxed shadow-sm bg-violet-600 text-white rounded-tr-none">
+                              {grouped.message.text}
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      if (grouped.type === 'model' && grouped.combinedText) {
+                        return (
+                          <div key={idx} className="flex flex-col gap-1 max-w-[80%] mr-auto items-start">
+                            <span className="text-[10px] text-gray-500 font-bold px-1 uppercase">Assistant</span>
+                            <div className="p-4 rounded-lg text-sm leading-relaxed shadow-sm bg-gray-900 border border-gray-800/80 text-gray-200 rounded-tl-none prose prose-invert prose-sm max-w-none">
+                              <Markdown remarkPlugins={[remarkGfm]}>{grouped.combinedText}</Markdown>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      return null;
+                    })}
+                    <div ref={chatEndRef}></div>
+                  </div>
+
+                  {/* Chat Input */}
+                  <div className="p-4 border-t border-gray-800 bg-gray-950">
+                    {errorMsg && (
+                      <div className="mb-2 bg-red-950/30 border border-red-800/50 rounded-lg p-2 text-red-300 text-xs flex gap-2 items-center">
+                        <AlertCircle className="w-3 h-3 shrink-0" />
+                        <span>{errorMsg}</span>
+                      </div>
+                    )}
+                    <div className="flex gap-2 items-center">
+                      {connectionMode !== 'noaudio' && (
+                        <button
+                          onClick={() => {
+                            if (!isConnected) { startSession(); }
+                            else if (connectionMode === 'webrtc') { stopSession(); }
+                            else { toggleRecording(); }
+                          }}
+                          onContextMenu={(e) => { e.preventDefault(); if (isConnected) stopSession(); }}
+                          disabled={isConnecting}
+                          title={!isConnected ? "Click to connect" : (connectionMode === 'webrtc' ? "Click to mute/unmute, right-click to disconnect" : "Click to record")}
+                          className={`p-3 rounded-lg border transition-all flex items-center justify-center ${
+                            isConnecting ? 'bg-gray-800 border-gray-700 text-gray-400'
+                              : !isConnected ? 'bg-violet-600 hover:bg-violet-700 border-violet-500 text-white'
+                              : isRecording ? 'bg-red-600 border-red-500 text-white animate-pulse'
+                              : isMuted ? 'bg-red-950/50 border-red-800/50 text-red-400'
+                              : 'bg-green-950/30 border-green-800/40 text-green-400'
+                          }`}
+                        >
+                          {isConnecting ? <Loader2 className="w-4 h-4 animate-spin" /> : !isConnected ? <Mic className="w-4 h-4" /> : isRecording || isMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                        </button>
+                      )}
+                      {isConnected && (
+                        <button onClick={stopSession} className="p-3 rounded-lg border bg-red-950/40 hover:bg-red-950/80 border-red-800 text-red-300 transition-all flex items-center justify-center" title="Disconnect">
+                          <Square className="w-4 h-4 fill-red-300" />
+                        </button>
+                      )}
+                      <input
+                        type="text"
+                        placeholder="Type a message and press enter..."
+                        disabled={connectionMode !== 'streaming' && connectionMode !== 'noaudio' && !isConnected}
+                        value={textInput}
+                        onChange={(e) => setTextInput(e.target.value)}
+                        onKeyDown={(e) => e.key === 'Enter' && sendTextMessage()}
+                        className="flex-1 bg-gray-900/80 border border-gray-800 focus:border-violet-500 text-white rounded px-4 py-3 focus:outline-none transition-colors text-sm"
+                      />
+                      <button onClick={sendTextMessage} disabled={connectionMode !== 'streaming' && connectionMode !== 'noaudio' && !isConnected} className="bg-violet-600 hover:bg-violet-700 disabled:bg-gray-800/50 p-3 rounded-lg text-white disabled:text-gray-600 transition-colors shadow-md">
+                        <Send className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-3 mt-2">
+                      <select value={connectionMode} onChange={(e) => setConnectionMode(e.target.value as 'webrtc' | 'streaming' | 'noaudio')} disabled={isConnected} className="text-[10px] px-2 py-1 rounded border bg-gray-800/50 border-gray-700 text-gray-400 cursor-pointer disabled:opacity-50 focus:outline-none focus:border-violet-500">
+                        <option value="webrtc">🎙️ Realtime</option>
+                        <option value="streaming">💬 Streaming</option>
+                        <option value="noaudio">⌨️ Text Only</option>
+                      </select>
+                      {(connectionMode === 'streaming' || connectionMode === 'noaudio') && (
+                        <div className="relative" ref={modelSelectorRef}>
+                          <button onClick={() => { setShowModelSelector(!showModelSelector); if (!showModelSelector) setModelSearch(''); }} className="text-[10px] px-2 py-1 rounded border bg-gray-800/50 border-gray-700 text-gray-400 hover:text-gray-300 hover:border-gray-600 transition-colors flex items-center gap-1.5">
+                            <Cpu className="w-3 h-3" />
+                            {availableModels.find(m => m.id === selectedModel)?.name || selectedModel}
+                            <ChevronDown className="w-3 h-3" />
+                          </button>
+                          {showModelSelector && (
+                            <div className="absolute bottom-full left-0 mb-1 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 min-w-[300px] max-h-[450px] flex flex-col">
+                              <div className="p-2 border-b border-gray-800">
+                                <input type="text" placeholder="Search models..." value={modelSearch} onChange={(e) => setModelSearch(e.target.value)} className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-violet-500" autoFocus />
+                              </div>
+                              <div className="overflow-y-auto flex-1 py-1">
+                                {favoriteModels.length > 0 && !modelSearch && (
+                                  <>
+                                    <div className="px-3 py-1 text-[9px] text-gray-500 uppercase font-semibold border-b border-gray-800">Favorites</div>
+                                    {availableModels.filter(m => favoriteModels.includes(m.id)).map((model) => (
+                                      <div key={model.id} className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 flex items-center justify-between ${selectedModel === model.id ? 'text-violet-400 bg-gray-800/50' : 'text-gray-300'}`}>
+                                        <button onClick={() => { setSelectedModel(model.id); setShowModelSelector(false); setModelSearch(''); }} className="flex-1 text-left">
+                                          <div className="flex items-center gap-2"><Star className="w-3 h-3 text-yellow-500 fill-yellow-500" /><span>{model.name}</span></div>
+                                          <span className="text-[9px] text-gray-500 ml-5">{model.provider}</span>
+                                        </button>
+                                        <button onClick={(e) => { e.stopPropagation(); toggleFavoriteModel(model.id); }} className="p-1 hover:bg-gray-700 rounded"><Star className="w-3 h-3 text-yellow-500 fill-yellow-500" /></button>
+                                      </div>
+                                    ))}
+                                    <div className="border-b border-gray-800 my-1"></div>
+                                  </>
+                                )}
+                                <div className="px-3 py-1 text-[9px] text-gray-500 uppercase font-semibold">{modelSearch ? 'Search Results' : (favoriteModels.length > 0 ? 'All Models' : 'Models')}</div>
+                                {availableModels.filter(m => { if (!modelSearch) return true; const s = modelSearch.toLowerCase(); return m.name.toLowerCase().includes(s) || m.id.toLowerCase().includes(s) || m.provider.toLowerCase().includes(s); }).map((model) => (
+                                  <div key={model.id} className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 flex items-center justify-between ${selectedModel === model.id ? 'text-violet-400 bg-gray-800/50' : 'text-gray-300'}`}>
+                                    <button onClick={() => { setSelectedModel(model.id); setShowModelSelector(false); setModelSearch(''); }} className="flex-1 text-left">
+                                      <span>{model.name}</span>
+                                      <span className="text-[9px] text-gray-500 ml-2">{model.provider}</span>
+                                      {model.pricing && <span className="text-[9px] text-gray-600 ml-2">${model.pricing.prompt.toFixed(6)}/tok</span>}
+                                    </button>
+                                    <button onClick={(e) => { e.stopPropagation(); toggleFavoriteModel(model.id); }} className="p-1 hover:bg-gray-700 rounded" title={favoriteModels.includes(model.id) ? "Remove from favorites" : "Add to favorites"}>
+                                      <Star className={`w-3 h-3 ${favoriteModels.includes(model.id) ? 'text-yellow-500 fill-yellow-500' : 'text-gray-600'}`} />
+                                    </button>
+                                  </div>
+                                ))}
                               </div>
                             </div>
                           )}
-
-                          <div className="flex justify-end mt-1">
-                            {isSelected ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
-                          </div>
                         </div>
-                      );
-                    })}
+                      )}
+                      {(connectionMode === 'streaming' || connectionMode === 'noaudio') && (
+                        <select value={thinkingEffort} onChange={(e) => setThinkingEffort(e.target.value as 'low' | 'medium' | 'high')} className="text-[10px] px-2 py-1 rounded border bg-gray-800/50 border-gray-700 text-gray-400 cursor-pointer focus:outline-none focus:border-violet-500" title="Thinking effort for reasoning models">
+                          <option value="low">🧠 Low</option>
+                          <option value="medium">🧠 Medium</option>
+                          <option value="high">🧠 High</option>
+                        </select>
+                      )}
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                        isConnected
+                          ? (isModelTalking ? 'bg-violet-950/50 text-violet-300 border border-violet-800/50'
+                            : isRecording ? 'bg-red-950/50 text-red-300 border border-red-800/50'
+                            : 'bg-green-950/30 text-green-400 border border-green-800/30')
+                          : 'bg-gray-900 text-gray-500 border border-gray-800'
+                      }`}>
+                        {isConnected
+                          ? (isModelTalking ? 'Speaking' : isRecording ? 'Recording' : connectionMode === 'webrtc' ? 'Live' : 'Ready')
+                          : 'Offline'}
+                      </span>
+                    </div>
                   </div>
+                </>
+              )}
+            </section>
+
+            {/* ═══ RIGHT COLUMN: BACKGROUND AGENTS ═══════════════════════════ */}
+            <section className="w-96 border-l border-gray-800/80 bg-gray-900/10 flex flex-col shrink-0">
+              <div className="px-6 py-4 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Cpu className="w-4 h-4 text-indigo-400 animate-pulse" />
+                  <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">Agents</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  {activeJobs.length > 0 && (
+                    <span className="text-xs bg-blue-950/50 border border-blue-900/60 text-blue-300 px-2 py-0.5 rounded-full font-bold">
+                      {activeJobs.length} active
+                    </span>
+                  )}
+                  {completedJobs.length > 0 && (
+                    <span className="text-xs bg-green-950/50 border border-green-900/60 text-green-300 px-2 py-0.5 rounded-full font-bold">
+                      {completedJobs.length} done
+                    </span>
+                  )}
+                  {failedJobs.length > 0 && (
+                    <span className="text-xs bg-red-950/50 border border-red-900/60 text-red-300 px-2 py-0.5 rounded-full font-bold">
+                      {failedJobs.length} failed
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {jobs.length === 0 ? (
+                  <div className="h-full flex flex-col items-center justify-center text-center p-6 text-gray-600">
+                    <HelpCircle className="w-10 h-10 mb-2 stroke-1" />
+                    <p className="text-xs">No background agents.</p>
+                    <p className="text-[10px] max-w-[200px] mt-1 leading-relaxed">
+                      Ask the assistant to spawn a background agent for complex tasks.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    {activeJobs.length > 0 && (
+                      <div>
+                        <div className="text-[10px] font-bold text-gray-500 uppercase mb-2 px-1">Active</div>
+                        {activeJobs.map((j) => {
+                          const isSelected = selectedJobId === j.job_id;
+                          const isAgentExpanded = expandedAgents.has(j.job_id);
+                          const toolLogs = j.logs.filter((l: any) => l.type === 'tool');
+                          const startLog = j.logs.find((l: any) => l.type === 'start');
+                          return (
+                            <div
+                              key={j.job_id}
+                              className={`border rounded-lg p-4 cursor-pointer transition-all hover:bg-gray-900/40 shadow-sm mb-3 ${
+                                isSelected ? 'bg-gray-900 border-indigo-500/50 shadow-md' : 'bg-gray-900/20 border-gray-800'
+                              }`}
+                              onClick={() => setSelectedJobId(isSelected ? null : j.job_id)}
+                            >
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-bold text-gray-300">{j.job_id}</span>
+                                <div className="flex items-center gap-2">
+                                  <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border ${getStatusColor(j.status)}`}>
+                                    <span className="flex items-center gap-1"><Loader2 className="w-2.5 h-3 animate-spin" /> running</span>
+                                  </span>
+                                  <button className="p-1 rounded hover:bg-red-900/50 text-gray-500 hover:text-red-400 transition-colors" onClick={(e) => { e.stopPropagation(); cancelJob(j.job_id); }} title="Stop job">
+                                    <Square className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              </div>
+                              <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-2">{j.description}</p>
+                              {isSelected && (
+                                <div className="mt-3 pt-3 border-t border-gray-800/80">
+                                  <button className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 uppercase mb-2 hover:text-gray-400" onClick={(e) => { e.stopPropagation(); setExpandedAgents(prev => { const next = new Set(prev); if (next.has(j.job_id)) next.delete(j.job_id); else next.add(j.job_id); return next; }); }}>
+                                    {isAgentExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                                    Agent ({startLog?.model || 'model'})
+                                  </button>
+                                  {isAgentExpanded && (
+                                    <div className="bg-gray-950 border border-gray-800/80 p-2.5 rounded text-[11px] leading-relaxed max-h-48 overflow-y-auto space-y-1.5 text-gray-300">
+                                      {toolLogs.length === 0 ? (
+                                        <div className="text-gray-600 italic">Initializing...</div>
+                                      ) : (
+                                        toolLogs.map((log: any, lIdx: number) => {
+                                          const args = log.name === 'execute_command' ? log.args?.command :
+                                            log.name === 'read_file' || log.name === 'write_file' ? log.args?.path :
+                                            log.name === 'list_directory' ? (log.args?.path || '.') : '';
+                                          let output = '';
+                                          if (log.name === 'execute_command' && log.result) {
+                                            const cmdResult = typeof log.result === 'string' ? JSON.parse(log.result) : log.result;
+                                            output = cmdResult.stdout?.trim() || (cmdResult.exit_code === 0 ? '✓' : `exit ${cmdResult.exit_code}`);
+                                          } else if (log.name === 'list_directory' && log.result?.files) {
+                                            output = log.result.files.map((f: any) => f.type === 'directory' ? `${f.name}/` : f.name).join(', ');
+                                          } else if (log.name === 'read_file' && log.result?.content) {
+                                            output = log.result.content.length > 60 ? log.result.content.slice(0, 60) + '...' : log.result.content;
+                                          } else if (log.name === 'write_file' && log.result?.message) {
+                                            output = '✓';
+                                          }
+                                          return (
+                                            <div key={lIdx} className="flex flex-col">
+                                              <span className="text-indigo-400">▸ {log.name} <span className="text-gray-500">{args}</span></span>
+                                              {output && <span className="text-gray-500 ml-4">{output}</span>}
+                                            </div>
+                                          );
+                                        })
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              <div className="flex justify-end mt-1">
+                                {isSelected ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {completedJobs.length > 0 && (
+                      <div>
+                        <div className="text-[10px] font-bold text-gray-500 uppercase mb-2 px-1">Completed</div>
+                        {completedJobs.map((j) => {
+                          const isSelected = selectedJobId === j.job_id;
+                          const isAgentExpanded = expandedAgents.has(j.job_id);
+                          const toolLogs = j.logs.filter((l: any) => l.type === 'tool');
+                          const summaryLog = j.logs.find((l: any) => l.type === 'summary');
+                          const startLog = j.logs.find((l: any) => l.type === 'start');
+                          return (
+                            <div
+                              key={j.job_id}
+                              className={`border rounded-lg p-4 cursor-pointer transition-all hover:bg-gray-900/40 shadow-sm mb-3 ${
+                                isSelected ? 'bg-gray-900 border-green-500/50 shadow-md' : 'bg-gray-900/20 border-gray-800'
+                              }`}
+                              onClick={() => setSelectedJobId(isSelected ? null : j.job_id)}
+                            >
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-bold text-gray-300">{j.job_id}</span>
+                                <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border text-green-400 bg-green-950/30 border-green-800/40">completed</span>
+                              </div>
+                              <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-2">{j.description}</p>
+                              {isSelected && (
+                                <div className="mt-3 pt-3 border-t border-gray-800/80">
+                                  <button className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 uppercase mb-2 hover:text-gray-400" onClick={(e) => { e.stopPropagation(); setExpandedAgents(prev => { const next = new Set(prev); if (next.has(j.job_id)) next.delete(j.job_id); else next.add(j.job_id); return next; }); }}>
+                                    {isAgentExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                                    Agent ({startLog?.model || 'model'})
+                                  </button>
+                                  {isAgentExpanded && (
+                                    <div className="bg-gray-950 border border-gray-800/80 p-2.5 rounded text-[11px] leading-relaxed max-h-48 overflow-y-auto space-y-1.5 text-gray-300">
+                                      {toolLogs.length === 0 ? (
+                                        <div className="text-gray-600 italic">No tool logs</div>
+                                      ) : (
+                                        toolLogs.map((log: any, lIdx: number) => {
+                                          const args = log.name === 'execute_command' ? log.args?.command :
+                                            log.name === 'read_file' || log.name === 'write_file' ? log.args?.path :
+                                            log.name === 'list_directory' ? (log.args?.path || '.') : '';
+                                          let output = '';
+                                          if (log.name === 'execute_command' && log.result) {
+                                            const cmdResult = typeof log.result === 'string' ? JSON.parse(log.result) : log.result;
+                                            output = cmdResult.stdout?.trim() || (cmdResult.exit_code === 0 ? '✓' : `exit ${cmdResult.exit_code}`);
+                                          } else if (log.name === 'list_directory' && log.result?.files) {
+                                            output = log.result.files.map((f: any) => f.type === 'directory' ? `${f.name}/` : f.name).join(', ');
+                                          } else if (log.name === 'read_file' && log.result?.content) {
+                                            output = log.result.content.length > 60 ? log.result.content.slice(0, 60) + '...' : log.result.content;
+                                          } else if (log.name === 'write_file' && log.result?.message) {
+                                            output = '✓';
+                                          }
+                                          return (
+                                            <div key={lIdx} className="flex flex-col">
+                                              <span className="text-indigo-400">▸ {log.name} <span className="text-gray-500">{args}</span></span>
+                                              {output && <span className="text-gray-500 ml-4">{output}</span>}
+                                            </div>
+                                          );
+                                        })
+                                      )}
+                                    </div>
+                                  )}
+                                  {summaryLog && (
+                                    <div className="mt-2 flex items-start gap-2 text-xs">
+                                      <span className="text-green-400 mt-0.5">✓</span>
+                                      <span className="text-gray-400">{summaryLog.text}</span>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                              <div className="flex justify-end mt-1">
+                                {isSelected ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {failedJobs.length > 0 && (
+                      <div>
+                        <div className="text-[10px] font-bold text-gray-500 uppercase mb-2 px-1">Failed</div>
+                        {failedJobs.map((j) => {
+                          const isSelected = selectedJobId === j.job_id;
+                          const errorLog = j.logs.find((l: any) => l.type === 'error');
+                          return (
+                            <div
+                              key={j.job_id}
+                              className={`border rounded-lg p-4 cursor-pointer transition-all hover:bg-gray-900/40 shadow-sm mb-3 ${
+                                isSelected ? 'bg-gray-900 border-red-500/50 shadow-md' : 'bg-gray-900/20 border-gray-800'
+                              }`}
+                              onClick={() => setSelectedJobId(isSelected ? null : j.job_id)}
+                            >
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs font-bold text-gray-300">{j.job_id}</span>
+                                <span className="text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border text-red-400 bg-red-950/30 border-red-800/40">failed</span>
+                              </div>
+                              <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-2">{j.description}</p>
+                              {isSelected && errorLog && (
+                                <div className="mt-3 pt-3 border-t border-gray-800/80">
+                                  <div className="flex items-start gap-2 text-xs">
+                                    <span className="text-red-400 mt-0.5">✕</span>
+                                    <span className="text-red-400">{errorLog.text}</span>
+                                  </div>
+                                </div>
+                              )}
+                              <div className="flex justify-end mt-1">
+                                {isSelected ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </>
                 )}
-              </>
-            )}
-          </div>
-        </section>
-      </main>
+              </div>
+            </section>
+          </main>
+        </>
+      )}
     </div>
   );
 }

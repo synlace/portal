@@ -35,6 +35,11 @@ SYSTEM_INSTRUCTION = (
     "like 'Running that now.' or 'Let me check.' THEN immediately call the tool.\n"
     "- After the tool completes, give a SHORT result like 'The output is: ...' or 'Done.'\n"
     "- Keep responses concise unless the user explicitly asks for detail.\n\n"
+    "AGENT SPAWN RULES:\n"
+    "- When spawning background agents, just spawn them and confirm. Do NOT automatically check their status.\n"
+    "- Do NOT call get_agent_status or list_agents unless the user explicitly asks.\n"
+    "- The user will check agent status themselves via the Background Agents panel or by asking.\n"
+    "- After spawning, just say something like 'Spawned [job_id] in [mode] mode.' and move on.\n\n"
     "Your workspace is mounted at '/workspace'. All paths must be resolved relative to this root."
 )
 
@@ -491,6 +496,153 @@ async def execute_tool_endpoint(req: ToolCall):
     logger.info(f"Executing tool {req.name} via HTTP endpoint")
     result = await execute_tool(req.name, req.arguments)
     return result
+
+# ─── Setup / Onboarding Endpoints ────────────────────────────────────────────
+
+WORKSPACE_DIR = os.environ.get("WORKSPACE_DIR", "/workspace")
+
+@app.get("/api/setup/status")
+async def setup_status():
+    """Check if .portal/ directory exists in the workspace."""
+    portal_dir = os.path.join(WORKSPACE_DIR, ".portal")
+    graph_path = os.path.join(portal_dir, "graph.json")
+    specs_dir = os.path.join(portal_dir, "specs")
+
+    has_portal_dir = os.path.isdir(portal_dir)
+    has_graph = os.path.isfile(graph_path)
+    has_specs = os.path.isdir(specs_dir) and bool(os.listdir(specs_dir)) if os.path.isdir(specs_dir) else False
+
+    graph = None
+    specs = []
+    if has_graph:
+        try:
+            with open(graph_path) as f:
+                graph = json.load(f)
+        except Exception:
+            graph = None
+
+    if has_specs:
+        try:
+            for fname in os.listdir(specs_dir):
+                fpath = os.path.join(specs_dir, fname)
+                if os.path.isfile(fpath) and fname.endswith(".md"):
+                    with open(fpath) as f:
+                        content = f.read()
+                    specs.append({"filename": fname, "content": content, "lines": content.count("\n") + 1})
+        except Exception:
+            specs = []
+
+    return {
+        "requires_setup": not has_portal_dir,
+        "has_graph": has_graph,
+        "has_specs": has_specs,
+        "graph": graph,
+        "specs": specs,
+    }
+
+
+class SetupGenerateRequest(BaseModel):
+    scan_src_only: bool = False
+    max_depth: int = 3
+    generate_specs: bool = True
+    include_readme: bool = True
+
+
+@app.post("/api/setup/generate")
+async def setup_generate(request: SetupGenerateRequest):
+    """Trigger the onboarding agent to scan the workspace and generate .portal/ artifacts.
+    This runs synchronously and returns the generated graph and specs."""
+    from backend.app.agents import spawn_onboarding_agent
+
+    portal_dir = os.path.join(WORKSPACE_DIR, ".portal")
+    specs_dir = os.path.join(portal_dir, "specs")
+    os.makedirs(specs_dir, exist_ok=True)
+
+    result = await spawn_onboarding_agent(
+        workspace=WORKSPACE_DIR,
+        scan_src_only=request.scan_src_only,
+        max_depth=request.max_depth,
+        generate_specs=request.generate_specs,
+        include_readme=request.include_readme,
+    )
+
+    # Write graph.json
+    graph_path = os.path.join(portal_dir, "graph.json")
+    with open(graph_path, "w") as f:
+        json.dump(result.get("graph", {"concepts": [], "specs": {}, "relationships": []}), f, indent=2)
+
+    # Write spec files
+    for spec in result.get("specs", []):
+        spec_path = os.path.join(specs_dir, spec["filename"])
+        with open(spec_path, "w") as f:
+            f.write(spec["content"])
+
+    return {
+        "status": "complete",
+        "graph": result.get("graph"),
+        "specs": result.get("specs", []),
+    }
+
+
+@app.get("/api/graph")
+async def get_graph():
+    """Read the concept graph from .portal/graph.json."""
+    graph_path = os.path.join(WORKSPACE_DIR, ".portal", "graph.json")
+    if not os.path.isfile(graph_path):
+        raise HTTPException(status_code=404, detail="No concept graph found. Run setup first.")
+    with open(graph_path) as f:
+        return json.load(f)
+
+
+@app.put("/api/graph")
+async def update_graph(request: Request):
+    """Write the concept graph to .portal/graph.json."""
+    body = await request.json()
+    portal_dir = os.path.join(WORKSPACE_DIR, ".portal")
+    os.makedirs(portal_dir, exist_ok=True)
+    graph_path = os.path.join(portal_dir, "graph.json")
+    with open(graph_path, "w") as f:
+        json.dump(body, f, indent=2)
+    return {"status": "ok"}
+
+
+@app.get("/api/specs")
+async def list_specs():
+    """List all spec files in .portal/specs/."""
+    specs_dir = os.path.join(WORKSPACE_DIR, ".portal", "specs")
+    if not os.path.isdir(specs_dir):
+        return {"specs": []}
+    specs = []
+    for fname in sorted(os.listdir(specs_dir)):
+        fpath = os.path.join(specs_dir, fname)
+        if os.path.isfile(fpath) and fname.endswith(".md"):
+            with open(fpath) as f:
+                content = f.read()
+            specs.append({"filename": fname, "content": content, "lines": content.count("\n") + 1})
+    return {"specs": specs}
+
+
+@app.get("/api/specs/{filename}")
+async def get_spec(filename: str):
+    """Read a single spec file."""
+    spec_path = os.path.join(WORKSPACE_DIR, ".portal", "specs", filename)
+    if not os.path.isfile(spec_path):
+        raise HTTPException(status_code=404, detail=f"Spec '{filename}' not found.")
+    with open(spec_path) as f:
+        content = f.read()
+    return {"filename": filename, "content": content, "lines": content.count("\n") + 1}
+
+
+@app.put("/api/specs/{filename}")
+async def update_spec(filename: str, request: Request):
+    """Write/update a spec file."""
+    body = await request.json()
+    specs_dir = os.path.join(WORKSPACE_DIR, ".portal", "specs")
+    os.makedirs(specs_dir, exist_ok=True)
+    spec_path = os.path.join(specs_dir, filename)
+    with open(spec_path, "w") as f:
+        f.write(body.get("content", ""))
+    return {"status": "ok", "filename": filename}
 
 @app.websocket("/ws")
 async def legacy_websocket_endpoint(websocket: WebSocket):
