@@ -173,6 +173,7 @@ export default function App() {
   // Jobs & Background agents
   const [jobs, setJobs] = useState<Job[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+  const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
 
   // Refs for SDK session and audio
   const sessionRef = useRef<RealtimeSession | null>(null);
@@ -941,7 +942,9 @@ export default function App() {
                     <div className="text-[10px] font-bold text-gray-500 uppercase mb-2 px-1">Active</div>
                     {activeJobs.map((j) => {
                       const isSelected = selectedJobId === j.job_id;
+                      const isAgentExpanded = expandedAgents.has(j.job_id);
                       const toolLogs = j.logs.filter((l: any) => l.type === 'tool');
+                      const startLog = j.logs.find((l: any) => l.type === 'start');
                       return (
                         <div 
                           key={j.job_id}
@@ -953,12 +956,10 @@ export default function App() {
                           <div className="flex items-center justify-between mb-2">
                             <span className="text-xs font-bold text-gray-300">{j.job_id}</span>
                             <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border ${getStatusColor(j.status)}`}>
-                              {j.status === 'running' ? (
-                                <span className="flex items-center gap-1">
-                                  <Loader2 className="w-2.5 h-3 animate-spin" />
-                                  running
-                                </span>
-                              ) : j.status}
+                              <span className="flex items-center gap-1">
+                                <Loader2 className="w-2.5 h-3 animate-spin" />
+                                running
+                              </span>
                             </span>
                           </div>
 
@@ -970,35 +971,49 @@ export default function App() {
                             <div className="mt-3 pt-3 border-t border-gray-800/80">
                               <button 
                                 className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 uppercase mb-2 hover:text-gray-400"
-                                onClick={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedAgents(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(j.job_id)) next.delete(j.job_id);
+                                    else next.add(j.job_id);
+                                    return next;
+                                  });
+                                }}
                               >
-                                <ChevronDown className="w-3 h-3" />
-                                Agent ({j.logs[0]?.model || 'model'})
+                                {isAgentExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                                Agent ({startLog?.model || 'model'})
                               </button>
-                              <div className="bg-gray-950 border border-gray-800/80 p-2.5 rounded text-[11px] leading-relaxed max-h-48 overflow-y-auto space-y-1.5 text-gray-300 font-mono">
-                                {toolLogs.map((log: any, lIdx: number) => {
-                                  const args = log.name === 'execute_command' ? log.args?.command : 
-                                               log.name === 'read_file' || log.name === 'write_file' ? log.args?.path :
-                                               log.name === 'list_directory' ? (log.args?.path || '.') : '';
-                                  let output = '';
-                                  if (log.name === 'execute_command' && log.result) {
-                                    const cmdResult = typeof log.result === 'string' ? JSON.parse(log.result) : log.result;
-                                    output = cmdResult.stdout?.trim() || (cmdResult.exit_code === 0 ? '✓' : `exit ${cmdResult.exit_code}`);
-                                  } else if (log.name === 'list_directory' && log.result?.files) {
-                                    output = log.result.files.map((f: any) => f.type === 'directory' ? `${f.name}/` : f.name).join(', ');
-                                  } else if (log.name === 'read_file' && log.result?.content) {
-                                    output = log.result.content.length > 60 ? log.result.content.slice(0, 60) + '...' : log.result.content;
-                                  } else if (log.name === 'write_file' && log.result?.message) {
-                                    output = '✓';
-                                  }
-                                  return (
-                                    <div key={lIdx} className="flex flex-col">
-                                      <span className="text-indigo-400">▸ {log.name} <span className="text-gray-500">{args}</span></span>
-                                      {output && <span className="text-gray-500 ml-4">{output}</span>}
-                                    </div>
-                                  );
-                                })}
-                              </div>
+                              {isAgentExpanded && (
+                                <div className="bg-gray-950 border border-gray-800/80 p-2.5 rounded text-[11px] leading-relaxed max-h-48 overflow-y-auto space-y-1.5 text-gray-300 font-mono">
+                                  {toolLogs.length === 0 ? (
+                                    <div className="text-gray-600 italic">Initializing...</div>
+                                  ) : (
+                                    toolLogs.map((log: any, lIdx: number) => {
+                                      const args = log.name === 'execute_command' ? log.args?.command : 
+                                                   log.name === 'read_file' || log.name === 'write_file' ? log.args?.path :
+                                                   log.name === 'list_directory' ? (log.args?.path || '.') : '';
+                                      let output = '';
+                                      if (log.name === 'execute_command' && log.result) {
+                                        const cmdResult = typeof log.result === 'string' ? JSON.parse(log.result) : log.result;
+                                        output = cmdResult.stdout?.trim() || (cmdResult.exit_code === 0 ? '✓' : `exit ${cmdResult.exit_code}`);
+                                      } else if (log.name === 'list_directory' && log.result?.files) {
+                                        output = log.result.files.map((f: any) => f.type === 'directory' ? `${f.name}/` : f.name).join(', ');
+                                      } else if (log.name === 'read_file' && log.result?.content) {
+                                        output = log.result.content.length > 60 ? log.result.content.slice(0, 60) + '...' : log.result.content;
+                                      } else if (log.name === 'write_file' && log.result?.message) {
+                                        output = '✓';
+                                      }
+                                      return (
+                                        <div key={lIdx} className="flex flex-col">
+                                          <span className="text-indigo-400">▸ {log.name} <span className="text-gray-500">{args}</span></span>
+                                          {output && <span className="text-gray-500 ml-4">{output}</span>}
+                                        </div>
+                                      );
+                                    })
+                                  )}
+                                </div>
+                              )}
                             </div>
                           )}
 
@@ -1017,8 +1032,10 @@ export default function App() {
                     <div className="text-[10px] font-bold text-gray-500 uppercase mb-2 px-1">Completed</div>
                     {completedJobs.map((j) => {
                       const isSelected = selectedJobId === j.job_id;
+                      const isAgentExpanded = expandedAgents.has(j.job_id);
                       const toolLogs = j.logs.filter((l: any) => l.type === 'tool');
                       const summaryLog = j.logs.find((l: any) => l.type === 'summary');
+                      const startLog = j.logs.find((l: any) => l.type === 'start');
                       return (
                         <div 
                           key={j.job_id}
@@ -1042,35 +1059,45 @@ export default function App() {
                             <div className="mt-3 pt-3 border-t border-gray-800/80">
                               <button 
                                 className="flex items-center gap-1.5 text-[10px] font-bold text-gray-500 uppercase mb-2 hover:text-gray-400"
-                                onClick={(e) => e.stopPropagation()}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setExpandedAgents(prev => {
+                                    const next = new Set(prev);
+                                    if (next.has(j.job_id)) next.delete(j.job_id);
+                                    else next.add(j.job_id);
+                                    return next;
+                                  });
+                                }}
                               >
-                                <ChevronDown className="w-3 h-3" />
-                                Agent ({j.logs[0]?.model || 'model'})
+                                {isAgentExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                                Agent ({startLog?.model || 'model'})
                               </button>
-                              <div className="bg-gray-950 border border-gray-800/80 p-2.5 rounded text-[11px] leading-relaxed max-h-48 overflow-y-auto space-y-1.5 text-gray-300 font-mono">
-                                {toolLogs.map((log: any, lIdx: number) => {
-                                  const args = log.name === 'execute_command' ? log.args?.command : 
-                                               log.name === 'read_file' || log.name === 'write_file' ? log.args?.path :
-                                               log.name === 'list_directory' ? (log.args?.path || '.') : '';
-                                  let output = '';
-                                  if (log.name === 'execute_command' && log.result) {
-                                    const cmdResult = typeof log.result === 'string' ? JSON.parse(log.result) : log.result;
-                                    output = cmdResult.stdout?.trim() || (cmdResult.exit_code === 0 ? '✓' : `exit ${cmdResult.exit_code}`);
-                                  } else if (log.name === 'list_directory' && log.result?.files) {
-                                    output = log.result.files.map((f: any) => f.type === 'directory' ? `${f.name}/` : f.name).join(', ');
-                                  } else if (log.name === 'read_file' && log.result?.content) {
-                                    output = log.result.content.length > 60 ? log.result.content.slice(0, 60) + '...' : log.result.content;
-                                  } else if (log.name === 'write_file' && log.result?.message) {
-                                    output = '✓';
-                                  }
-                                  return (
-                                    <div key={lIdx} className="flex flex-col">
-                                      <span className="text-indigo-400">▸ {log.name} <span className="text-gray-500">{args}</span></span>
-                                      {output && <span className="text-gray-500 ml-4">{output}</span>}
-                                    </div>
-                                  );
-                                })}
-                              </div>
+                              {isAgentExpanded && (
+                                <div className="bg-gray-950 border border-gray-800/80 p-2.5 rounded text-[11px] leading-relaxed max-h-48 overflow-y-auto space-y-1.5 text-gray-300 font-mono">
+                                  {toolLogs.map((log: any, lIdx: number) => {
+                                    const args = log.name === 'execute_command' ? log.args?.command : 
+                                                 log.name === 'read_file' || log.name === 'write_file' ? log.args?.path :
+                                                 log.name === 'list_directory' ? (log.args?.path || '.') : '';
+                                    let output = '';
+                                    if (log.name === 'execute_command' && log.result) {
+                                      const cmdResult = typeof log.result === 'string' ? JSON.parse(log.result) : log.result;
+                                      output = cmdResult.stdout?.trim() || (cmdResult.exit_code === 0 ? '✓' : `exit ${cmdResult.exit_code}`);
+                                    } else if (log.name === 'list_directory' && log.result?.files) {
+                                      output = log.result.files.map((f: any) => f.type === 'directory' ? `${f.name}/` : f.name).join(', ');
+                                    } else if (log.name === 'read_file' && log.result?.content) {
+                                      output = log.result.content.length > 60 ? log.result.content.slice(0, 60) + '...' : log.result.content;
+                                    } else if (log.name === 'write_file' && log.result?.message) {
+                                      output = '✓';
+                                    }
+                                    return (
+                                      <div key={lIdx} className="flex flex-col">
+                                        <span className="text-indigo-400">▸ {log.name} <span className="text-gray-500">{args}</span></span>
+                                        {output && <span className="text-gray-500 ml-4">{output}</span>}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
                               {summaryLog && (
                                 <div className="mt-2 flex items-start gap-2 text-xs">
                                   <span className="text-green-400 mt-0.5">✓</span>
