@@ -273,6 +273,38 @@ export default function App() {
   const [activeConcept, setActiveConcept] = useState<string | null>(null);
   const [graphFullscreen, setGraphFullscreen] = useState(false);
 
+  // ─── Resizable Panes ───────────────────────────────────────────────────────
+  const [leftWidth, setLeftWidth] = useState(340);
+  const [rightWidth, setRightWidth] = useState(384);
+  const isResizing = useRef<'left' | 'right' | null>(null);
+
+  const handleResizeStart = useCallback((side: 'left' | 'right') => (e: React.MouseEvent) => {
+    e.preventDefault();
+    isResizing.current = side;
+    const startX = e.clientX;
+    const startWidth = side === 'left' ? leftWidth : rightWidth;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = ev.clientX - startX;
+      if (isResizing.current === 'left') {
+        setLeftWidth(Math.max(240, Math.min(600, startWidth + delta)));
+      } else {
+        setRightWidth(Math.max(240, Math.min(600, startWidth - delta)));
+      }
+    };
+    const onMouseUp = () => {
+      isResizing.current = null;
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [leftWidth, rightWidth]);
+
   // Refs for SDK session and audio
   const sessionRef = useRef<RealtimeSession | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
@@ -1420,7 +1452,7 @@ export default function App() {
           <main className="flex-1 flex overflow-hidden">
 
             {/* ═══ LEFT COLUMN: CONCEPT GRAPH + SPECS ═══════════════════════ */}
-            <section className="w-[340px] border-r border-gray-800/80 bg-gray-950/35 flex flex-col shrink-0 overflow-hidden">
+            <section style={{ width: leftWidth }} className="border-r border-gray-800/80 bg-gray-950/35 flex flex-col shrink-0 overflow-hidden">
               {/* Graph Header */}
               <div className="px-5 py-3 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between shrink-0">
                 <span className="text-xs font-bold text-gray-400 uppercase tracking-widest flex items-center gap-1.5">
@@ -1500,6 +1532,12 @@ export default function App() {
                 )}
               </div>
             </section>
+
+            {/* Resize Handle: Left → Center */}
+            <div
+              onMouseDown={handleResizeStart('left')}
+              className="w-1 bg-gray-800 hover:bg-violet-600 cursor-col-resize shrink-0 transition-colors"
+            />
 
             {/* ═══ MIDDLE COLUMN: CONCEPT PANEL OR CONVERSATION ═══════════════ */}
             <section className="flex-1 flex flex-col bg-gray-900/5 overflow-hidden">
@@ -1827,8 +1865,14 @@ export default function App() {
               )}
             </section>
 
+            {/* Resize Handle: Center → Right */}
+            <div
+              onMouseDown={handleResizeStart('right')}
+              className="w-1 bg-gray-800 hover:bg-violet-600 cursor-col-resize shrink-0 transition-colors"
+            />
+
             {/* ═══ RIGHT COLUMN: BACKGROUND AGENTS ═══════════════════════════ */}
-            <section className="w-96 border-l border-gray-800/80 bg-gray-900/10 flex flex-col shrink-0">
+            <section style={{ width: rightWidth }} className="border-l border-gray-800/80 bg-gray-900/10 flex flex-col shrink-0">
               <div className="px-5 py-3 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between shrink-0">
                 <div className="flex items-center gap-2">
                   <Cpu className="w-4 h-4 text-indigo-400 animate-pulse" />
