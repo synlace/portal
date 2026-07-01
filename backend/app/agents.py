@@ -156,22 +156,22 @@ async def run_agent_loop(job_id: str, description: str):
     import json
     from backend.app.tool_executor import execute_tool
     
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key or api_key in ("your_api_key", "your_api_key_here"):
-        api_key = os.environ.get("GEMINI_API_KEY")
-        
-    if not api_key or api_key in ("your_api_key", "your_api_key_here"):
+    # Sub-agent model configuration via environment variables
+    agent_model = os.environ.get("AGENT_MODEL", "gpt-4o-mini")
+    agent_api_key = os.environ.get("AGENT_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    agent_base_url = os.environ.get("AGENT_BASE_URL", "https://api.openai.com/v1/chat/completions")
+    
+    if not agent_api_key or agent_api_key in ("your_api_key", "your_api_key_here"):
         JOBS[job_id]["status"] = "failed"
-        JOBS[job_id]["logs"].append("Error: OPENAI_API_KEY environment variable is missing or set to an invalid placeholder. Cannot run background agent.")
+        JOBS[job_id]["logs"].append("Error: No API key configured. Set AGENT_API_KEY or OPENAI_API_KEY.")
         return
 
     JOBS[job_id]["status"] = "running"
     JOBS[job_id]["updated_at"] = datetime.utcnow().isoformat()
-    JOBS[job_id]["logs"].append("Background agent started.")
+    JOBS[job_id]["logs"].append(f"Background agent started (model={agent_model}).")
 
-    url = "https://api.openai.com/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {api_key}",
+        "Authorization": f"Bearer {agent_api_key}",
         "Content-Type": "application/json"
     }
     
@@ -189,14 +189,14 @@ async def run_agent_loop(job_id: str, description: str):
             JOBS[job_id]["updated_at"] = datetime.utcnow().isoformat()
             
             payload = {
-                "model": "gpt-4o-mini",
+                "model": agent_model,
                 "messages": messages,
                 "tools": AGENT_TOOLS,
                 "tool_choice": "auto"
             }
             
             try:
-                response = await client.post(url, json=payload, headers=headers, timeout=45.0)
+                response = await client.post(agent_base_url, json=payload, headers=headers, timeout=45.0)
                 if response.status_code != 200:
                     error_msg = f"OpenAI API returned error code {response.status_code}: {response.text}"
                     JOBS[job_id]["logs"].append(f"Error: {error_msg}")
