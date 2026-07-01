@@ -926,8 +926,8 @@ export default function App() {
         }
       }
       
-      // Play TTS for the response if there's text and no tool calls
-      if (accumulatedText && !hasToolCalls) {
+      // Play TTS for the response if there's text and no tool calls (not in text only mode)
+      if (accumulatedText && !hasToolCalls && connectionMode !== 'noaudio') {
         try {
           const ttsResponse = await fetch('/api/tts', {
             method: 'POST',
