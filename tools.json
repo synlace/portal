@@ -1,0 +1,209 @@
+[
+  {
+    "type": "function",
+    "name": "list_directory",
+    "description": "List files and subdirectories in the workspace.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Relative path inside the workspace to list. Defaults to root ('.')."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "read_file",
+    "description": "Read the full content of a file from the workspace.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Relative path of the file to read."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "write_file",
+    "description": "Create a new file or completely overwrite an existing file in the workspace.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Relative path of the file to write."
+        },
+        "content": {
+          "type": "string",
+          "description": "Full content to write to the file."
+        }
+      },
+      "required": [
+        "path",
+        "content"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "edit_file",
+    "description": "Apply a specific text replacement inside an existing file in the workspace.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Relative path of the file to edit."
+        },
+        "old_string": {
+          "type": "string",
+          "description": "The exact block of text to find."
+        },
+        "new_string": {
+          "type": "string",
+          "description": "The text block to replace it with."
+        }
+      },
+      "required": [
+        "path",
+        "old_string",
+        "new_string"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "execute_command",
+    "description": "Execute a terminal command in the workspace directory. Use to run scripts, build files, run tests, or check status.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "command": {
+          "type": "string",
+          "description": "The exact terminal command to run."
+        }
+      },
+      "required": [
+        "command"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "create_directory",
+    "description": "Create a new directory in the workspace.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Relative path of the directory to create."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "delete_file",
+    "description": "Delete a file or empty directory from the workspace.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Relative path of the file or directory to delete."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "move_file",
+    "description": "Rename or move a file or directory within the workspace.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string",
+          "description": "Current relative path of the file or directory."
+        },
+        "destination": {
+          "type": "string",
+          "description": "New relative path for the file or directory."
+        }
+      },
+      "required": [
+        "source",
+        "destination"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "spawn_agent",
+    "description": "Delegate a complex, multi-step coding task to a background agent that runs independently. Returns a unique job ID.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "A detailed description of the task for the agent, e.g. 'write unit tests for file.py'."
+        }
+      },
+      "required": [
+        "description"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "get_agent_status",
+    "description": "Check the status, logs, and finished work of a previously spawned background agent using its job ID.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "job_id": {
+          "type": "string",
+          "description": "The unique job ID of the agent to query."
+        }
+      },
+      "required": [
+        "job_id"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "type": "function",
+    "name": "list_agents",
+    "description": "List all background agents with their status summary.",
+    "parameters": {
+      "type": "object",
+      "properties": {},
+      "additionalProperties": false
+    }
+  }
+]

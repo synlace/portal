@@ -1,0 +1,1091 @@
+import { useState, useEffect, useRef } from 'react';
+import { 
+  Play, Square, Mic, MicOff,
+  AlertCircle, Loader2, HelpCircle, Send, Cpu, ChevronRight, ChevronDown 
+} from 'lucide-react';
+import { RealtimeAgent, RealtimeSession, OpenAIRealtimeWebRTC, tool } from '@openai/agents/realtime';
+import toolsSchema from '../../tools.json';
+
+// ─── System prompt ───────────────────────────────────────────────────────────
+const SYSTEM_INSTRUCTION =
+  "You are 'portal', a low-latency, real-time AI software developer. You speak directly to the " +
+  "user via a bidirectional live audio stream. You have access to their workspace via a mounted volume, " +
+  "allowing you to view and edit files, run bash commands, and spawn background agents.\n\n" +
+  "YOU HAVE FULL ACCESS TO SHELL COMMANDS. When the user asks you to run a command (like 'pwd', 'ls', " +
+  "'cat file.txt', 'npm install', etc.), you MUST use the 'execute_command' tool to run it and return " +
+  "the output. Never say you cannot run commands - you absolutely can.\n\n" +
+  "RESPONSE FORMAT RULES:\n" +
+  "- When the user asks you to do something that requires a tool, give a SHORT 5-10 word acknowledgment " +
+  "like 'Running that now.' or 'Let me check.' THEN immediately call the tool. Do NOT give multiple responses.\n" +
+  "- After the tool completes, give a SHORT result like 'The output is: ...' or 'Done. I've created the file.'\n" +
+  "- NEVER generate multiple separate responses to a single user request. One acknowledgment + tool call + one result.\n" +
+  "- Keep ALL spoken responses under 20 words unless the user explicitly asks for detail.\n\n" +
+  "CRITICAL VOICE CONSTRAINTS:\n" +
+  "1. Always keep spoken answers short, professional, and conversational. Do not ramble.\n" +
+  "2. NEVER speak out loud long blocks of code, markdown tables, or extensive directories. " +
+  "If the user asks you to write code, do it silently by using your tools ('write_file' or 'edit_file'), " +
+  "and then briefly say: 'I've written that code to [filename]. [Brief 1-sentence summary of what it does].'\n" +
+  "3. If a task is complex, multi-step, or requires running multiple bash commands, spawn a background agent " +
+  "using 'spawn_agent' so we can keep talking in real-time. Give the user the job ID, and tell them you will " +
+  "check back on it later.\n" +
+  "4. Your workspace is mounted at '/workspace'. All paths provided to tools must be resolved relative to this root.\n" +
+  "5. ALWAYS use tools to perform actions. If the user asks to read a file, use read_file. If they ask to run a command, " +
+  "use execute_command. If they ask to create/modify files, use write_file or edit_file. Never claim you cannot do something " +
+  "that your tools can do.";
+
+// ─── Helper: forward tool execution to backend /api/execute_tool ─────────────
+const callBackendTool = async (name: string, args: Record<string, any>): Promise<string> => {
+  const resp = await fetch('/api/execute_tool', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, arguments: args }),
+  });
+  if (!resp.ok) throw new Error(`Tool ${name} failed with HTTP ${resp.status}`);
+  const result = await resp.json();
+  return JSON.stringify(result);
+};
+
+// ─── Tool definitions using SDK's tool() helper ──────────────────────────────
+const TOOLS = toolsSchema.map(toolDef => 
+  tool({
+    name: toolDef.name,
+    description: toolDef.description,
+    parameters: toolDef.parameters as any,
+    execute: async (args: any) => {
+      return await callBackendTool(toolDef.name, args);
+    },
+  })
+);
+
+// ─── Format tool args for human-readable display ────────────────────────────
+const formatToolArgs = (toolName: string, args: any): string => {
+  if (!args) return '';
+  
+  switch (toolName) {
+    case 'execute_command':
+      return args.command || '';
+    case 'read_file':
+    case 'write_file':
+    case 'edit_file':
+    case 'list_directory':
+    case 'create_directory':
+    case 'delete_file':
+      return args.path || '';
+    case 'move_file':
+      return args.source && args.destination ? `${args.source} → ${args.destination}` : '';
+    case 'spawn_agent':
+      return args.description || '';
+    case 'get_agent_status':
+      return args.job_id || '';
+    case 'list_agents':
+      return '';
+    default:
+      return JSON.stringify(args);
+  }
+};
+
+// ─── Group consecutive model messages into single turns ─────────────────────
+interface GroupedMessage {
+  type: 'system' | 'user' | 'tool' | 'model';
+  messages?: Message[];
+  combinedText?: string;
+  message?: Message;
+}
+
+const groupMessages = (messages: Message[]): GroupedMessage[] => {
+  const sorted = [...messages].sort((a, b) => {
+    const tA = a.timestamp instanceof Date ? a.timestamp.getTime() : new Date(a.timestamp).getTime();
+    const tB = b.timestamp instanceof Date ? b.timestamp.getTime() : new Date(b.timestamp).getTime();
+    if (Math.abs(tA - tB) < 1000) {
+      if (a.role === 'user' && b.role === 'model') return -1;
+      if (a.role === 'model' && b.role === 'user') return 1;
+    }
+    return tA - tB;
+  });
+
+  const grouped: GroupedMessage[] = [];
+  let i = 0;
+
+  while (i < sorted.length) {
+    const msg = sorted[i];
+
+    if (msg.role === 'system' || msg.role === 'tool') {
+      grouped.push({ type: msg.role, message: msg });
+      i++;
+      continue;
+    }
+
+    if (msg.role === 'user') {
+      grouped.push({ type: 'user', message: msg });
+      i++;
+      continue;
+    }
+
+    // For model messages, group consecutive ones within 3 seconds
+    if (msg.role === 'model') {
+      const modelGroup: Message[] = [msg];
+      const groupStart = msg.timestamp instanceof Date ? msg.timestamp.getTime() : new Date(msg.timestamp).getTime();
+      i++;
+
+      while (i < sorted.length && sorted[i].role === 'model') {
+        const nextTime = sorted[i].timestamp instanceof Date ? sorted[i].timestamp.getTime() : new Date(sorted[i].timestamp).getTime();
+        if (nextTime - groupStart < 3000) {
+          modelGroup.push(sorted[i]);
+          i++;
+        } else {
+          break;
+        }
+      }
+
+      const combinedText = modelGroup.map(m => m.text || '').join(' ');
+      grouped.push({ type: 'model', messages: modelGroup, combinedText });
+      continue;
+    }
+
+    i++;
+  }
+
+  return grouped;
+};
+
+// ─── Types ───────────────────────────────────────────────────────────────────
+interface Job {
+  job_id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  description: string;
+  logs: string[];
+  result: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface Message {
+  role: 'user' | 'model' | 'system' | 'tool';
+  text?: string;
+  id?: string;
+  toolName?: string;
+  toolArgs?: any;
+  toolStatus?: 'executing' | 'completed' | 'failed';
+  toolResult?: string;
+  timestamp: Date;
+}
+
+export default function App() {
+  // Connection and Authentication
+  const [apiKey, setApiKey] = useState('');
+  const [isConnected, setIsConnected] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // Voice States
+  const [isMuted, setIsMuted] = useState(false);
+  const [isModelTalking, _setIsModelTalking] = useState(false);
+  const isModelTalkingRef = useRef(false);
+  const setIsModelTalking = (val: boolean) => {
+    _setIsModelTalking(val);
+    isModelTalkingRef.current = val;
+  };
+  const [isUserSpeaking, setIsUserSpeaking] = useState(false);
+
+  // Chat & Messages
+  const [textInput, setTextInput] = useState('');
+  const [messages, setMessages] = useState<Message[]>([
+    {
+      role: 'system',
+      text: "Welcome to portal. Use the voice button or chat box to speak with your AI assistant. You can ask it to view, create, or edit files in your workspace, run commands, or spawn background agents for heavy tasks.",
+      timestamp: new Date()
+    }
+  ]);
+
+  // Jobs & Background agents
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+
+  // Refs for SDK session and audio
+  const sessionRef = useRef<RealtimeSession | null>(null);
+  const audioElRef = useRef<HTMLAudioElement | null>(null);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const userSpeechStopTimestampRef = useRef<number>(0);
+  const micDrainTimeoutRef = useRef<any>(null);
+  const userSpeakingRef = useRef<boolean>(false);
+
+  // Separate mute suppression driven purely by server events, decoupled from isModelTalking visual state
+  const micSuppressedRef = useRef<boolean>(false);
+
+  const applyMuteState = () => {
+    const shouldMute = isMutedRef.current || micSuppressedRef.current;
+    logger(`applyMuteState: isMuted=${isMutedRef.current}, micSuppressed=${micSuppressedRef.current} -> shouldMute=${shouldMute}`);
+    if (sessionRef.current) {
+      sessionRef.current.mute(shouldMute);
+    }
+  };
+
+  const suppressMic = () => {
+    logger("suppressMic() called! Muting session to suppress microphone and prevent echo.");
+    if (micDrainTimeoutRef.current) {
+      clearTimeout(micDrainTimeoutRef.current);
+      micDrainTimeoutRef.current = null;
+    }
+    micSuppressedRef.current = true;
+    applyMuteState();
+  };
+
+  const unsuppressMicAfterDrain = () => {
+    logger("unsuppressMicAfterDrain() called! Initiating 4-second mic drain timeout.");
+    if (micDrainTimeoutRef.current) {
+      clearTimeout(micDrainTimeoutRef.current);
+    }
+    micDrainTimeoutRef.current = setTimeout(() => {
+      logger("4-second mic drain timeout completed! Re-enabling mic stream.");
+      micSuppressedRef.current = false;
+      micDrainTimeoutRef.current = null;
+      applyMuteState();
+    }, 4000);
+  };
+
+  const isMutedRef = useRef<boolean>(false);
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
+
+  useEffect(() => {
+    applyMuteState();
+  }, [isMuted]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // Periodically fetch background jobs
+  useEffect(() => {
+    const fetchJobs = async () => {
+      try {
+        const res = await fetch('/api/jobs');
+        if (res.ok) {
+          const data = await res.json();
+          setJobs(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch background agents:', err);
+      }
+    };
+
+    fetchJobs();
+    const interval = setInterval(fetchJobs, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // ─── Connect via @openai/agents RealtimeSession ────────────────────────────────
+  const startSession = async () => {
+    if (isConnecting || isConnected) return;
+    setIsConnecting(true);
+    setErrorMsg('');
+
+    try {
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+      micStreamRef.current = stream;
+
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 256;
+      source.connect(analyser);
+
+      const audioEl = document.createElement('audio');
+      audioEl.autoplay = true;
+      audioElRef.current = audioEl;
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      const checkVolume = () => {
+        if (!sessionRef.current) {
+          audioCtx.close().catch(() => {});
+          return;
+        }
+        if (audioCtx.state === 'suspended') {
+          audioCtx.resume().catch(() => {});
+        }
+
+        analyser.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
+        const average = sum / bufferLength;
+        const userSpeaking = average > 10;
+        setIsUserSpeaking(userSpeaking);
+
+        if (userSpeakingRef.current !== userSpeaking) {
+          logger(`[Local Audio Transition] User speaking changed from ${userSpeakingRef.current} to ${userSpeaking} (avg: ${average.toFixed(2)})`);
+          userSpeakingRef.current = userSpeaking;
+        }
+
+        if (userSpeaking && micDrainTimeoutRef.current) {
+          logger("[Early Cancellation] User spoke during 4-second drain window! Cancelling and unmuting mic.");
+          clearTimeout(micDrainTimeoutRef.current);
+          micDrainTimeoutRef.current = null;
+          micSuppressedRef.current = false;
+          applyMuteState();
+        }
+
+        requestAnimationFrame(checkVolume);
+      };
+      checkVolume();
+
+      const webrtcTransport = new OpenAIRealtimeWebRTC({
+        baseUrl: `${window.location.origin}/api/session`,
+        mediaStream: stream,
+        audioElement: audioEl,
+        useInsecureApiKey: true,
+        changePeerConnection: (pc) => {
+          const cfg = pc.getConfiguration();
+          if (!cfg.iceServers?.length) {
+            pc.setConfiguration({
+              ...cfg,
+              iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:stun1.l.google.com:19302' },
+              ],
+            });
+          }
+
+          pc.addEventListener('track', (e) => {
+            try {
+              const remoteSource = audioCtx.createMediaStreamSource(e.streams[0]);
+              const remoteAnalyser = audioCtx.createAnalyser();
+              remoteAnalyser.fftSize = 256;
+              remoteSource.connect(remoteAnalyser);
+
+              const remoteBufferLength = remoteAnalyser.frequencyBinCount;
+              const remoteDataArray = new Uint8Array(remoteBufferLength);
+
+              const checkRemoteVolume = () => {
+                if (!sessionRef.current) return;
+                remoteAnalyser.getByteFrequencyData(remoteDataArray);
+                let sum = 0;
+                for (let i = 0; i < remoteBufferLength; i++) sum += remoteDataArray[i];
+                const average = sum / remoteBufferLength;
+                const modelAudible = average > 15;
+                if (isModelTalkingRef.current !== modelAudible) {
+                  logger(`[Remote Audio Transition] Model audible changed from ${isModelTalkingRef.current} to ${modelAudible} (avg: ${average.toFixed(2)})`);
+                  setIsModelTalking(modelAudible);
+                }
+                requestAnimationFrame(checkRemoteVolume);
+              };
+              checkRemoteVolume();
+            } catch (err) {
+              console.error('Failed to set up remote audio analyser:', err);
+            }
+          });
+
+          pc.onconnectionstatechange = () => {
+            logger(`WebRTC Connection State: ${pc.connectionState}`);
+            if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+              stopSession();
+            }
+          };
+
+          return pc;
+        },
+      });
+
+      const agent = new RealtimeAgent({
+        name: 'portal',
+        instructions: SYSTEM_INSTRUCTION,
+        tools: TOOLS as any,
+      });
+
+      const session = new RealtimeSession(agent, {
+        model: 'gpt-realtime-2',
+        transport: webrtcTransport,
+        config: {
+          outputModalities: ['audio'],
+          audio: {
+            input: {
+              transcription: { model: 'gpt-4o-mini-transcribe' },
+              turnDetection: {
+                type: 'server_vad',
+                threshold: 0.5,
+                prefixPaddingMs: 300,
+                silenceDurationMs: 500,
+              },
+            },
+            output: { voice: 'alloy' },
+          },
+        },
+      });
+      sessionRef.current = session;
+
+      let modelAudioActive = false;
+
+      // SDK handles function calls internally — we just listen for item_update events
+      session.on('item_update', (item: any) => {
+        if (item.type === 'function_call') {
+          const args = JSON.parse(item.arguments || '{}');
+          if (item.status === 'in_progress') {
+            logger(`SDK tool start: ${item.name}`);
+            handleToolUpdate({ name: item.name, args, status: 'executing' });
+          } else if (item.status === 'completed') {
+            logger(`SDK tool completed: ${item.name}`);
+            handleToolUpdate({ name: item.name, args, status: 'completed', result: item.output });
+          }
+        }
+      });
+
+      session.on('audio_stopped', () => {
+        logger('SDK audio_stopped: starting 4s mic drain');
+        modelAudioActive = false;
+        setIsModelTalking(false);
+        unsuppressMicAfterDrain();
+      });
+
+      session.on('audio_interrupted', () => {
+        logger('SDK audio_interrupted: resetting mic drain');
+        modelAudioActive = false;
+        setIsModelTalking(false);
+        unsuppressMicAfterDrain();
+      });
+
+      session.on('transport_event', (event: any) => {
+        console.log('OpenAI Server Event:', event);
+
+        if (event.type === 'input_audio_buffer.speech_stopped' || event.type === 'input_audio_buffer.committed') {
+          userSpeechStopTimestampRef.current = Date.now();
+        }
+
+        if (event.type === 'response.output_audio_transcript.delta') {
+          if (!modelAudioActive) {
+            modelAudioActive = true;
+            logger('First transcript delta — suppressing mic (WebRTC audio_start substitute)');
+            setIsModelTalking(true);
+            suppressMic();
+          }
+          const itemId = event.item_id;
+          const text = event.delta;
+          setMessages(prev => {
+            const existingIdx = prev.findIndex(m => m.id === itemId);
+            if (existingIdx !== -1) {
+              const updated = [...prev];
+              updated[existingIdx] = { ...updated[existingIdx], text: (updated[existingIdx].text || '') + text };
+              return updated;
+            }
+            return [...prev, { role: 'model', text, id: itemId, timestamp: new Date() }];
+          });
+        }
+
+        else if (event.type === 'conversation.item.added' && event.item?.role === 'user') {
+          const itemId = event.item.id;
+          const contentPart = event.item.content?.[0];
+          const isTextMsg = contentPart?.type === 'input_text';
+          const textVal = contentPart?.text;
+
+          setMessages(prev => {
+            if (prev.some(m => m.id === itemId)) return prev;
+
+            const message: Message = {
+              role: 'user',
+              text: isTextMsg && textVal ? textVal : '🎙️ Transcribing...',
+              id: itemId,
+              timestamp: isTextMsg ? new Date() : new Date(userSpeechStopTimestampRef.current || (Date.now() - 2000)),
+            };
+
+            if (isTextMsg && textVal) {
+              const matchingIdx = prev.findIndex(m => m.role === 'user' && m.text === textVal && !m.id);
+              if (matchingIdx !== -1) {
+                const updated = [...prev];
+                updated[matchingIdx] = { ...updated[matchingIdx], id: itemId };
+                return updated;
+              }
+            }
+
+            const lastMsg = prev[prev.length - 1];
+            if (lastMsg?.role === 'model') {
+              const updated = [...prev];
+              updated.splice(prev.length - 1, 0, message);
+              return updated;
+            }
+            return [...prev, message];
+          });
+        }
+
+        else if (event.type === 'conversation.item.input_audio_transcription.completed') {
+          const transcript = event.transcript;
+          const itemId = event.item_id;
+          if (transcript?.trim()) {
+            setMessages(prev => {
+              const idx = prev.findIndex(m => m.id === itemId);
+              if (idx !== -1) {
+                const updated = [...prev];
+                updated[idx] = { ...updated[idx], text: transcript };
+                return updated;
+              }
+              return [...prev, {
+                role: 'user', text: transcript, id: itemId,
+                timestamp: new Date(userSpeechStopTimestampRef.current || (Date.now() - 2000)),
+              }];
+            });
+          }
+        }
+      });
+
+      session.on('error', (err) => {
+        logger(`Session error: ${JSON.stringify(err)}`);
+        stopSession();
+      });
+
+      const tokenUrl = `/api/session/token?apiKey=${encodeURIComponent(apiKey)}`;
+      const tokenRes = await fetch(tokenUrl, { method: 'POST' });
+      if (!tokenRes.ok) {
+        const errText = await tokenRes.text();
+        throw new Error(`Failed to get session token: ${errText}`);
+      }
+      const { client_secret } = await tokenRes.json();
+
+      await session.connect({ apiKey: client_secret });
+
+      applyMuteState();
+
+      setIsConnected(true);
+      setIsConnecting(false);
+
+    } catch (err: any) {
+      console.error(err);
+      setErrorMsg(err.message || 'Error starting session');
+      stopSession();
+    }
+  };
+
+  const stopSession = () => {
+    setIsConnected(false);
+    setIsConnecting(false);
+    setIsModelTalking(false);
+    setIsUserSpeaking(false);
+    micSuppressedRef.current = false;
+
+    if (micDrainTimeoutRef.current) {
+      clearTimeout(micDrainTimeoutRef.current);
+      micDrainTimeoutRef.current = null;
+    }
+
+    if (sessionRef.current) {
+      try { sessionRef.current.close(); } catch {}
+      sessionRef.current = null;
+    }
+
+    if (micStreamRef.current) {
+      micStreamRef.current.getTracks().forEach(track => track.stop());
+      micStreamRef.current = null;
+    }
+
+    if (audioElRef.current) {
+      audioElRef.current.srcObject = null;
+      audioElRef.current = null;
+    }
+  };
+
+  const handleToolUpdate = (msg: any) => {
+    const { name, args, status, result } = msg;
+
+    setMessages(prev => {
+      const existingIdx = prev.findIndex(m =>
+        m.role === 'tool' &&
+        m.toolName === name &&
+        m.toolStatus === 'executing' &&
+        JSON.stringify(m.toolArgs) === JSON.stringify(args)
+      );
+
+      if (existingIdx !== -1) {
+        const updated = [...prev];
+        updated[existingIdx] = {
+          role: 'tool', toolName: name, toolArgs: args,
+          toolStatus: status, toolResult: result, timestamp: new Date(),
+        };
+        return updated;
+      }
+      return [...prev, {
+        role: 'tool', toolName: name, toolArgs: args,
+        toolStatus: status, toolResult: result, timestamp: new Date(),
+      }];
+    });
+  };
+
+  const sendTextMessage = () => {
+    if (!textInput.trim() || !sessionRef.current) return;
+
+    sessionRef.current.sendMessage(textInput);
+
+    setMessages(prev => [...prev, { role: 'user', text: textInput, timestamp: new Date() }]);
+    setTextInput('');
+  };
+
+  const logger = (msg: string) => {
+    console.log(`[Portal] ${msg}`);
+  };
+
+  const activeJobs = jobs.filter(j => j.status === 'pending' || j.status === 'running');
+  const completedJobs = jobs.filter(j => j.status === 'completed');
+  const failedJobs = jobs.filter(j => j.status === 'failed');
+
+  const getStatusColor = (status: string) => {
+    const colors: Record<string, string> = {
+      pending: 'text-amber-400 bg-amber-950/30 border-amber-800/40',
+      queued: 'text-amber-400 bg-amber-950/30 border-amber-800/40',
+      running: 'text-blue-400 bg-blue-950/30 border-blue-800/40',
+      completed: 'text-green-400 bg-green-950/30 border-green-800/40',
+      failed: 'text-red-400 bg-red-950/30 border-red-800/40',
+    };
+    return colors[status] || colors.pending;
+  };
+
+  const getToolIcon = (toolName: string) => {
+    if (toolName === 'spawn_agent') return '🚀';
+    if (toolName === 'list_directory' || toolName === 'read_file') return '📄';
+    if (toolName === 'write_file' || toolName === 'edit_file') return '✏️';
+    if (toolName === 'execute_command') return '⚡';
+    if (toolName === 'create_directory') return '📁';
+    if (toolName === 'delete_file') return '🗑️';
+    if (toolName === 'move_file') return '📦';
+    return '🔧';
+  };
+
+  return (
+    <div className="flex flex-col h-screen bg-gray-950 font-mono">
+      {/* Header bar */}
+      <header className="border-b border-gray-800 bg-gray-900/60 backdrop-blur px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="w-4 h-4 rounded-full bg-violet-500 animate-pulse"></div>
+          <h1 className="text-xl font-bold bg-gradient-to-r from-violet-400 to-indigo-400 bg-clip-text text-transparent">
+            portal
+          </h1>
+          <span className="text-xs text-gray-400 bg-gray-800 px-2.5 py-0.5 rounded-md">v1.0.0-beta</span>
+          <span className="text-[10px] px-2.5 py-0.5 rounded border bg-violet-950/40 border-violet-800 text-violet-300">
+            🎙️ WebRTC Realtime
+          </span>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {!isConnected && (
+            <input 
+              type="password" 
+              placeholder="Enter OpenAI API Key (or set in env)" 
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              className="text-xs bg-gray-950 border border-gray-800 focus:border-violet-500 text-white rounded px-3 py-2 w-64 focus:outline-none transition-colors"
+            />
+          )}
+
+          {isConnected ? (
+            <button 
+              onClick={stopSession}
+              className="bg-red-950/40 hover:bg-red-950/80 border border-red-800 text-red-300 px-4 py-1.5 rounded text-sm font-semibold flex items-center gap-2 transition-all"
+            >
+              <Square className="w-4 h-4 fill-red-300" />
+              Disconnect
+            </button>
+          ) : (
+            <button 
+              onClick={startSession}
+              disabled={isConnecting}
+              className="bg-violet-600 hover:bg-violet-700 disabled:bg-violet-800 text-white px-5 py-1.5 rounded text-sm font-semibold flex items-center gap-2 transition-all shadow-lg shadow-violet-500/10"
+            >
+              {isConnecting ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Connecting...
+                </>
+              ) : (
+                <>
+                  <Play className="w-4 h-4 fill-white" />
+                  Connect
+                </>
+              )}
+            </button>
+          )}
+        </div>
+      </header>
+
+      {/* Main dashboard grid */}
+      <main className="flex-1 flex overflow-hidden">
+        {/* LEFT COLUMN: VOICE INTERFACE */}
+        <section className="w-80 border-r border-gray-800/80 bg-gray-900/10 flex flex-col p-6 items-center gap-6 justify-center">
+          <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest self-start">Voice Interface</h2>
+          
+          <div className="flex-1 flex flex-col items-center justify-center gap-6">
+            <div className="relative flex items-center justify-center">
+              {isModelTalking && (
+                <div className="absolute w-44 h-44 rounded-full border-2 border-violet-500/20 animate-ping"></div>
+              )}
+              
+              <div className={`w-36 h-44 flex items-center justify-center gap-1.5 transition-all duration-300 ${
+                isConnected ? 'opacity-100' : 'opacity-20'
+              }`}>
+                {[...Array(5)].map((_, i) => (
+                  <span 
+                    key={i} 
+                    className={`w-2 rounded bg-gradient-to-t from-violet-600 to-indigo-400 ${
+                      (isModelTalking || isUserSpeaking) ? 'wave-bar h-24' : 'h-4 transition-all duration-300'
+                    }`}
+                  ></span>
+                ))}
+              </div>
+            </div>
+
+            <div className="text-center">
+              <span className={`text-xs font-semibold px-3 py-1 rounded-full ${
+                isConnected 
+                  ? (isModelTalking ? 'bg-violet-950/50 text-violet-300 border border-violet-800/50' : 'bg-green-950/30 text-green-400 border border-green-800/30')
+                  : 'bg-gray-900 text-gray-500 border border-gray-800'
+              }`}>
+                {isConnected 
+                  ? (isModelTalking ? 'Assistant Speaking' : 'Live & Listening')
+                  : 'Offline'}
+              </span>
+            </div>
+
+            <button 
+              onClick={() => setIsMuted(!isMuted)}
+              disabled={!isConnected}
+              className={`p-4 rounded-full border transition-all ${
+                !isConnected 
+                  ? 'bg-gray-900 text-gray-600 border-gray-800 cursor-not-allowed'
+                  : isMuted 
+                    ? 'bg-red-950/50 border-red-800/50 text-red-400 hover:bg-red-950/80 shadow-lg shadow-red-500/5'
+                    : 'bg-violet-950/30 border-violet-800/40 text-violet-400 hover:bg-violet-950/50 shadow-lg shadow-violet-500/5'
+              }`}
+            >
+              {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
+            </button>
+            <p className="text-[10px] text-gray-500 text-center max-w-[200px]">
+              {isMuted ? "Microphone is muted" : "Your voice is streamed securely using WebRTC."}
+            </p>
+          </div>
+
+          {errorMsg && (
+            <div className="bg-red-950/30 border border-red-800/50 rounded-lg p-3 text-red-300 text-xs flex gap-2.5 items-start">
+              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+        </section>
+
+        {/* MIDDLE COLUMN: CONVERSATION LOG */}
+        <section className="flex-1 flex flex-col bg-gray-900/5">
+          <div className="px-6 py-4 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between">
+            <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">Conversation</span>
+            <span className="text-xs text-violet-400 font-semibold">{messages.length} messages</span>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            {groupMessages(messages).map((grouped, idx) => {
+              if (grouped.type === 'system' && grouped.message) {
+                return (
+                  <div key={idx} className="bg-violet-950/15 border border-violet-900/30 text-violet-300 p-4 rounded text-xs leading-relaxed max-w-2xl">
+                    {grouped.message.text}
+                  </div>
+                );
+              }
+
+              if (grouped.type === 'tool' && grouped.message) {
+                const m = grouped.message;
+                const isExec = m.toolStatus === 'executing';
+                const isDelegated = m.toolName === 'spawn_agent';
+                const toolIcon = getToolIcon(m.toolName || '');
+                const humanReadableArgs = formatToolArgs(m.toolName || '', m.toolArgs);
+                return (
+                  <div key={idx} className={`bg-gray-900 border border-gray-800/80 rounded p-4 text-xs font-mono space-y-2.5 max-w-3xl shadow-md ${
+                    isDelegated ? 'border-l-4 border-l-violet-500' : 'border-l-4 border-l-indigo-500'
+                  }`}>
+                    <div className={`flex items-center justify-between font-bold border-b border-gray-800/60 pb-1.5 ${
+                      isDelegated ? 'text-violet-400' : 'text-indigo-400'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        {isExec ? <Loader2 className="w-3.5 h-4 animate-spin" /> : <span>{toolIcon}</span>}
+                        <span>{m.toolName}</span>
+                      </div>
+                      <span className="text-[10px] text-gray-500">
+                        {isExec ? 'Executing...' : 'Completed'}
+                      </span>
+                    </div>
+
+                    {humanReadableArgs && (
+                      <div className="text-gray-300 font-semibold">
+                        {humanReadableArgs}
+                      </div>
+                    )}
+
+                    {m.toolResult && (
+                      <div className="bg-gray-950 p-2.5 rounded border border-gray-800/50 max-h-36 overflow-y-auto text-green-400/90 whitespace-pre-wrap">
+                        {m.toolResult}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+
+              if (grouped.type === 'user' && grouped.message) {
+                return (
+                  <div key={idx} className="flex flex-col gap-1 max-w-[80%] ml-auto items-end">
+                    <span className="text-[10px] text-gray-500 font-bold px-1 uppercase">
+                      You
+                    </span>
+                    <div className="p-4 rounded-lg text-sm leading-relaxed shadow-sm bg-violet-600 text-white rounded-tr-none">
+                      {grouped.message.text}
+                    </div>
+                  </div>
+                );
+              }
+
+              if (grouped.type === 'model' && grouped.combinedText) {
+                return (
+                  <div key={idx} className="flex flex-col gap-1 max-w-[80%] mr-auto items-start">
+                    <span className="text-[10px] text-gray-500 font-bold px-1 uppercase">
+                      Assistant
+                    </span>
+                    <div className="p-4 rounded-lg text-sm leading-relaxed shadow-sm bg-gray-900 border border-gray-800/80 text-gray-200 rounded-tl-none">
+                      {grouped.combinedText}
+                    </div>
+                  </div>
+                );
+              }
+
+              return null;
+            })}
+            <div ref={chatEndRef}></div>
+          </div>
+
+          {/* Text Chat Input */}
+          <div className="p-4 border-t border-gray-800 bg-gray-950 flex gap-3 items-center">
+            <input 
+              type="text" 
+              placeholder={isConnected ? "Type a message and press enter..." : "Connect to start chatting"} 
+              disabled={!isConnected}
+              value={textInput}
+              onChange={(e) => setTextInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && sendTextMessage()}
+              className="flex-1 bg-gray-900/80 border border-gray-800 focus:border-violet-500 text-white rounded px-4 py-3 focus:outline-none transition-colors text-sm font-sans"
+            />
+            <button 
+              onClick={sendTextMessage}
+              disabled={!isConnected}
+              className="bg-violet-600 hover:bg-violet-700 disabled:bg-gray-800/50 p-3 rounded-lg text-white disabled:text-gray-600 transition-colors shadow-md"
+            >
+              <Send className="w-4 h-4" />
+            </button>
+          </div>
+        </section>
+
+        {/* RIGHT COLUMN: BACKGROUND AGENTS */}
+        <section className="w-96 border-l border-gray-800/80 bg-gray-900/10 flex flex-col">
+          <div className="px-6 py-4 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Cpu className="w-4 h-4 text-indigo-400 animate-pulse" />
+              <span className="text-sm font-bold text-gray-400 uppercase tracking-widest">Background Agents</span>
+            </div>
+            <div className="flex items-center gap-2">
+              {activeJobs.length > 0 && (
+                <span className="text-xs bg-blue-950/50 border border-blue-900/60 text-blue-300 px-2 py-0.5 rounded-full font-bold">
+                  {activeJobs.length} active
+                </span>
+              )}
+              {completedJobs.length > 0 && (
+                <span className="text-xs bg-green-950/50 border border-green-900/60 text-green-300 px-2 py-0.5 rounded-full font-bold">
+                  {completedJobs.length} done
+                </span>
+              )}
+              {failedJobs.length > 0 && (
+                <span className="text-xs bg-red-950/50 border border-red-900/60 text-red-300 px-2 py-0.5 rounded-full font-bold">
+                  {failedJobs.length} failed
+                </span>
+              )}
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            {jobs.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center p-6 text-gray-600">
+                <HelpCircle className="w-10 h-10 mb-2 stroke-1" />
+                <p className="text-xs">No background agents.</p>
+                <p className="text-[10px] max-w-[200px] mt-1 leading-relaxed">
+                  Ask the assistant to spawn a background agent for complex tasks.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Active Jobs */}
+                {activeJobs.length > 0 && (
+                  <div>
+                    <div className="text-[10px] font-bold text-gray-500 uppercase mb-2 px-1">Active</div>
+                    {activeJobs.map((j) => {
+                      const isSelected = selectedJobId === j.job_id;
+                      return (
+                        <div 
+                          key={j.job_id}
+                          className={`border rounded-lg p-4 cursor-pointer transition-all hover:bg-gray-900/40 shadow-sm mb-3 ${
+                            isSelected ? 'bg-gray-900 border-indigo-500/50 shadow-md' : 'bg-gray-900/20 border-gray-800'
+                          }`}
+                          onClick={() => setSelectedJobId(isSelected ? null : j.job_id)}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold text-gray-300">{j.job_id}</span>
+                            <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border ${getStatusColor(j.status)}`}>
+                              {j.status === 'running' ? (
+                                <span className="flex items-center gap-1">
+                                  <Loader2 className="w-2.5 h-3 animate-spin" />
+                                  running
+                                </span>
+                              ) : j.status}
+                            </span>
+                          </div>
+
+                          <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-3">
+                            {j.description}
+                          </p>
+
+                          {isSelected && (
+                            <div className="mt-4 pt-3 border-t border-gray-800/80 space-y-3">
+                              <div className="text-[10px] font-bold text-gray-500 uppercase">Agent Logs:</div>
+                              <div className="bg-gray-950 border border-gray-800/80 p-3 rounded text-[11px] leading-relaxed max-h-60 overflow-y-auto space-y-2 text-gray-300 font-sans whitespace-pre-wrap">
+                                {j.logs.map((log, lIdx) => (
+                                  <div key={lIdx} className="border-b border-gray-900/60 pb-1.5 last:border-0">
+                                    {log}
+                                  </div>
+                                ))}
+                              </div>
+                              
+                              {j.result && (
+                                <div className="space-y-1.5">
+                                  <div className="text-[10px] font-bold text-green-500 uppercase">Final Output:</div>
+                                  <div className="bg-green-950/15 border border-green-900/30 text-green-300 p-3 rounded text-xs leading-relaxed font-sans">
+                                    {j.result}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="flex justify-end mt-1">
+                            {isSelected ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Completed Jobs */}
+                {completedJobs.length > 0 && (
+                  <div>
+                    <div className="text-[10px] font-bold text-gray-500 uppercase mb-2 px-1">Completed</div>
+                    {completedJobs.map((j) => {
+                      const isSelected = selectedJobId === j.job_id;
+                      return (
+                        <div 
+                          key={j.job_id}
+                          className={`border rounded-lg p-4 cursor-pointer transition-all hover:bg-gray-900/40 shadow-sm mb-3 ${
+                            isSelected ? 'bg-gray-900 border-green-500/50 shadow-md' : 'bg-gray-900/20 border-gray-800'
+                          }`}
+                          onClick={() => setSelectedJobId(isSelected ? null : j.job_id)}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold text-gray-300">{j.job_id}</span>
+                            <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border ${getStatusColor(j.status)}`}>
+                              completed
+                            </span>
+                          </div>
+
+                          <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-3">
+                            {j.description}
+                          </p>
+
+                          {isSelected && (
+                            <div className="mt-4 pt-3 border-t border-gray-800/80 space-y-3">
+                              <div className="text-[10px] font-bold text-gray-500 uppercase">Agent Logs:</div>
+                              <div className="bg-gray-950 border border-gray-800/80 p-3 rounded text-[11px] leading-relaxed max-h-60 overflow-y-auto space-y-2 text-gray-300 font-sans whitespace-pre-wrap">
+                                {j.logs.map((log, lIdx) => (
+                                  <div key={lIdx} className="border-b border-gray-900/60 pb-1.5 last:border-0">
+                                    {log}
+                                  </div>
+                                ))}
+                              </div>
+                              
+                              {j.result && (
+                                <div className="space-y-1.5">
+                                  <div className="text-[10px] font-bold text-green-500 uppercase">Final Output:</div>
+                                  <div className="bg-green-950/15 border border-green-900/30 text-green-300 p-3 rounded text-xs leading-relaxed font-sans">
+                                    {j.result}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+
+                          <div className="flex justify-end mt-1">
+                            {isSelected ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* Failed Jobs */}
+                {failedJobs.length > 0 && (
+                  <div>
+                    <div className="text-[10px] font-bold text-gray-500 uppercase mb-2 px-1">Failed</div>
+                    {failedJobs.map((j) => {
+                      const isSelected = selectedJobId === j.job_id;
+                      return (
+                        <div 
+                          key={j.job_id}
+                          className={`border rounded-lg p-4 cursor-pointer transition-all hover:bg-gray-900/40 shadow-sm mb-3 ${
+                            isSelected ? 'bg-gray-900 border-red-500/50 shadow-md' : 'bg-gray-900/20 border-gray-800'
+                          }`}
+                          onClick={() => setSelectedJobId(isSelected ? null : j.job_id)}
+                        >
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-xs font-bold text-gray-300">{j.job_id}</span>
+                            <span className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase border ${getStatusColor(j.status)}`}>
+                              failed
+                            </span>
+                          </div>
+
+                          <p className="text-xs text-gray-400 line-clamp-2 leading-relaxed mb-3">
+                            {j.description}
+                          </p>
+
+                          {isSelected && j.logs.length > 0 && (
+                            <div className="mt-4 pt-3 border-t border-gray-800/80 space-y-3">
+                              <div className="text-[10px] font-bold text-gray-500 uppercase">Agent Logs:</div>
+                              <div className="bg-gray-950 border border-gray-800/80 p-3 rounded text-[11px] leading-relaxed max-h-60 overflow-y-auto space-y-2 text-gray-300 font-sans whitespace-pre-wrap">
+                                {j.logs.map((log, lIdx) => (
+                                  <div key={lIdx} className="border-b border-gray-900/60 pb-1.5 last:border-0">
+                                    {log}
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex justify-end mt-1">
+                            {isSelected ? <ChevronDown className="w-4 h-4 text-gray-500" /> : <ChevronRight className="w-4 h-4 text-gray-500" />}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
