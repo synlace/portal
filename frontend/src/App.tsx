@@ -176,7 +176,6 @@ export default function App() {
     _setIsModelTalking(val);
     isModelTalkingRef.current = val;
   };
-  const [isUserSpeaking, setIsUserSpeaking] = useState(false);
 
   // Chat & Messages
   const [textInput, setTextInput] = useState('');
@@ -194,7 +193,7 @@ export default function App() {
   const [expandedAgents, setExpandedAgents] = useState<Set<string>>(new Set());
 
   // Connection mode
-  const [connectionMode, setConnectionMode] = useState<'webrtc' | 'streaming'>('webrtc');
+  const [connectionMode, setConnectionMode] = useState<'webrtc' | 'streaming' | 'noaudio'>('webrtc');
   const [isRecording, setIsRecording] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -421,7 +420,6 @@ export default function App() {
         for (let i = 0; i < bufferLength; i++) sum += dataArray[i];
         const average = sum / bufferLength;
         const userSpeaking = average > 10;
-        setIsUserSpeaking(userSpeaking);
 
         if (userSpeakingRef.current !== userSpeaking) {
           logger(`[Local Audio Transition] User speaking changed from ${userSpeakingRef.current} to ${userSpeaking} (avg: ${average.toFixed(2)})`);
@@ -697,7 +695,6 @@ export default function App() {
     setIsConnected(false);
     setIsConnecting(false);
     setIsModelTalking(false);
-    setIsUserSpeaking(false);
     micSuppressedRef.current = false;
 
     if (micDrainTimeoutRef.current) {
@@ -1135,15 +1132,6 @@ export default function App() {
             portal
           </h1>
           <span className="text-xs text-gray-400 bg-gray-800 px-2.5 py-0.5 rounded-md">v1.0.0-beta</span>
-          <select 
-            value={connectionMode}
-            onChange={(e) => setConnectionMode(e.target.value as 'webrtc' | 'streaming')}
-            disabled={isConnected}
-            className="text-[10px] px-2 py-1 rounded border bg-violet-950/40 border-violet-800 text-violet-300 cursor-pointer disabled:opacity-50 focus:outline-none focus:border-violet-500"
-          >
-            <option value="webrtc">🎙️ Realtime</option>
-            <option value="streaming">💬 Streaming</option>
-          </select>
         </div>
 
         <div className="flex items-center gap-3">
@@ -1156,115 +1144,11 @@ export default function App() {
               className="text-xs bg-gray-950 border border-gray-800 focus:border-violet-500 text-white rounded px-3 py-2 w-64 focus:outline-none transition-colors"
             />
           )}
-
-          {isConnected ? (
-            <button 
-              onClick={stopSession}
-              className="bg-red-950/40 hover:bg-red-950/80 border border-red-800 text-red-300 px-4 py-1.5 rounded text-sm font-semibold flex items-center gap-2 transition-all"
-            >
-              <Square className="w-4 h-4 fill-red-300" />
-              Disconnect
-            </button>
-          ) : (
-            <button 
-              onClick={startSession}
-              disabled={isConnecting}
-              className="bg-violet-600 hover:bg-violet-700 disabled:bg-violet-800 text-white px-5 py-1.5 rounded text-sm font-semibold flex items-center gap-2 transition-all shadow-lg shadow-violet-500/10"
-            >
-              {isConnecting ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Connecting...
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4 fill-white" />
-                  Connect
-                </>
-              )}
-            </button>
-          )}
         </div>
       </header>
 
       {/* Main dashboard grid */}
       <main className="flex-1 flex overflow-hidden">
-        {/* LEFT COLUMN: VOICE INTERFACE */}
-        <section className="w-80 border-r border-gray-800/80 bg-gray-900/10 flex flex-col p-6 items-center gap-6 justify-center">
-          <h2 className="text-sm font-bold text-gray-400 uppercase tracking-widest self-start">Voice Interface</h2>
-          
-          <div className="flex-1 flex flex-col items-center justify-center gap-6">
-            <div className="relative flex items-center justify-center">
-              {isModelTalking && (
-                <div className="absolute w-44 h-44 rounded-full border-2 border-violet-500/20 animate-ping"></div>
-              )}
-              
-              <div className={`w-36 h-44 flex items-center justify-center gap-1.5 transition-all duration-300 ${
-                isConnected ? 'opacity-100' : 'opacity-20'
-              }`}>
-                {[...Array(5)].map((_, i) => (
-                  <span 
-                    key={i} 
-                    className={`w-2 rounded bg-gradient-to-t from-violet-600 to-indigo-400 ${
-                      connectionMode === 'webrtc'
-                        ? (isModelTalking || isUserSpeaking) ? 'wave-bar h-24' : 'h-4 transition-all duration-300'
-                        : isRecording ? 'wave-bar h-24' : 'h-4 transition-all duration-300'
-                    }`}
-                  ></span>
-                ))}
-              </div>
-            </div>
-
-            <div className="text-center">
-              <span className={`text-xs font-semibold px-3 py-1 rounded-full ${
-                isConnected 
-                  ? (isModelTalking ? 'bg-violet-950/50 text-violet-300 border border-violet-800/50' 
-                    : isRecording ? 'bg-red-950/50 text-red-300 border border-red-800/50'
-                    : 'bg-green-950/30 text-green-400 border border-green-800/30')
-                  : 'bg-gray-900 text-gray-500 border border-gray-800'
-              }`}>
-                {isConnected 
-                  ? (isModelTalking ? 'Assistant Speaking' 
-                    : isRecording ? 'Recording...' 
-                    : connectionMode === 'webrtc' ? 'Live & Listening' : 'Ready')
-                  : 'Offline'}
-              </span>
-            </div>
-
-            <button 
-              onClick={connectionMode === 'webrtc' ? () => setIsMuted(!isMuted) : toggleRecording}
-              disabled={!isConnected}
-              className={`p-4 rounded-full border transition-all ${
-                !isConnected 
-                  ? 'bg-gray-900 text-gray-600 border-gray-800 cursor-not-allowed'
-                  : isRecording 
-                    ? 'bg-red-600 border-red-500 text-white animate-pulse shadow-lg shadow-red-500/20'
-                    : isMuted 
-                      ? 'bg-red-950/50 border-red-800/50 text-red-400 hover:bg-red-950/80 shadow-lg shadow-red-500/5'
-                      : 'bg-violet-950/30 border-violet-800/40 text-violet-400 hover:bg-violet-950/50 shadow-lg shadow-violet-500/5'
-              }`}
-            >
-              {isRecording ? <MicOff className="w-6 h-6" /> : isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
-            </button>
-            <p className="text-[10px] text-gray-500 text-center max-w-[200px]">
-              {isRecording 
-                ? "Recording... click to stop" 
-                : isMuted 
-                  ? "Microphone is muted" 
-                  : connectionMode === 'webrtc' 
-                    ? "Your voice is streamed securely using WebRTC."
-                    : "Click to record voice message."}
-            </p>
-          </div>
-
-          {errorMsg && (
-            <div className="bg-red-950/30 border border-red-800/50 rounded-lg p-3 text-red-300 text-xs flex gap-2.5 items-start">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{errorMsg}</span>
-            </div>
-          )}
-        </section>
-
         {/* MIDDLE COLUMN: CONVERSATION LOG */}
         <section className="flex-1 flex flex-col bg-gray-900/5">
           <div className="px-6 py-4 border-b border-gray-800/50 bg-gray-900/20 flex items-center justify-between">
@@ -1481,18 +1365,67 @@ export default function App() {
             <div ref={chatEndRef}></div>
           </div>
 
-          {/* Text Chat Input */}
+          {/* Chat Input */}
           <div className="p-4 border-t border-gray-800 bg-gray-950">
-            <div className="flex gap-3 items-center mb-2">
+            {/* Error message */}
+            {errorMsg && (
+              <div className="mb-2 bg-red-950/30 border border-red-800/50 rounded-lg p-2 text-red-300 text-xs flex gap-2 items-center">
+                <AlertCircle className="w-3 h-3 shrink-0" />
+                <span>{errorMsg}</span>
+              </div>
+            )}
+            
+            {/* Main input row */}
+            <div className="flex gap-2 items-center">
+              {/* Mic/Connect button - hidden in noaudio mode */}
+              {connectionMode !== 'noaudio' && (
+                <button 
+                  onClick={() => {
+                    if (!isConnected) {
+                      startSession();
+                    } else if (connectionMode === 'webrtc') {
+                      setIsMuted(!isMuted);
+                    } else {
+                      toggleRecording();
+                    }
+                  }}
+                  disabled={isConnecting}
+                  className={`p-3 rounded-lg border transition-all flex items-center justify-center ${
+                    isConnecting
+                      ? 'bg-gray-800 border-gray-700 text-gray-400'
+                      : !isConnected
+                        ? 'bg-violet-600 hover:bg-violet-700 border-violet-500 text-white'
+                        : isRecording
+                          ? 'bg-red-600 border-red-500 text-white animate-pulse'
+                          : isMuted
+                            ? 'bg-red-950/50 border-red-800/50 text-red-400'
+                            : 'bg-green-950/30 border-green-800/40 text-green-400'
+                  }`}
+                >
+                  {isConnecting ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : !isConnected ? (
+                    <Play className="w-4 h-4 fill-white" />
+                  ) : isRecording || isMuted ? (
+                    <MicOff className="w-4 h-4" />
+                  ) : (
+                    <Mic className="w-4 h-4" />
+                  )}
+                </button>
+              )}
+              
+              {/* Text input */}
               <input 
                 type="text" 
-                placeholder={connectionMode === 'streaming' ? "Type a message and press enter..." : (isConnected ? "Type a message and press enter..." : "Connect to start chatting")} 
+                placeholder={connectionMode === 'noaudio' ? "Type a message and press enter..." : (isConnected ? "Type a message and press enter..." : "Press mic to connect, then type...")} 
                 disabled={connectionMode !== 'streaming' && !isConnected}
                 value={textInput}
                 onChange={(e) => setTextInput(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && sendTextMessage()}
                 className="flex-1 bg-gray-900/80 border border-gray-800 focus:border-violet-500 text-white rounded px-4 py-3 focus:outline-none transition-colors text-sm font-sans"
               />
+              
+              {/* Send button */}
               <button 
                 onClick={sendTextMessage}
                 disabled={connectionMode !== 'streaming' && !isConnected}
@@ -1502,144 +1435,174 @@ export default function App() {
               </button>
             </div>
             
-            {/* Model Selector */}
-            {connectionMode === 'streaming' && (
-              <div className="relative" ref={modelSelectorRef}>
-                <button
-                  onClick={() => {
-                    setShowModelSelector(!showModelSelector);
-                    if (!showModelSelector) setModelSearch('');
-                  }}
-                  className="text-[10px] px-2 py-1 rounded border bg-gray-800/50 border-gray-700 text-gray-400 hover:text-gray-300 hover:border-gray-600 transition-colors flex items-center gap-1.5"
-                >
-                  <Cpu className="w-3 h-3" />
-                  {availableModels.find(m => m.id === selectedModel)?.name || selectedModel}
-                  <ChevronDown className="w-3 h-3" />
-                </button>
-                
-                {showModelSelector && (
-                  <div className="absolute bottom-full left-0 mb-1 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 min-w-[300px] max-h-[450px] flex flex-col">
-                    {/* Search Field */}
-                    <div className="p-2 border-b border-gray-800">
-                      <input
-                        type="text"
-                        placeholder="Search models..."
-                        value={modelSearch}
-                        onChange={(e) => setModelSearch(e.target.value)}
-                        className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-violet-500"
-                        autoFocus
-                      />
-                    </div>
-                    
-                    {/* Models List */}
-                    <div className="overflow-y-auto flex-1 py-1">
-                      {/* Favorites Section */}
-                      {favoriteModels.length > 0 && !modelSearch && (
-                        <>
-                          <div className="px-3 py-1 text-[9px] text-gray-500 uppercase font-semibold border-b border-gray-800">
-                            Favorites
-                          </div>
-                          {availableModels
-                            .filter(m => favoriteModels.includes(m.id))
-                            .map((model) => (
-                              <div
-                                key={model.id}
-                                className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 flex items-center justify-between ${
-                                  selectedModel === model.id ? 'text-violet-400 bg-gray-800/50' : 'text-gray-300'
-                                }`}
-                              >
-                                <button
-                                  onClick={() => {
-                                    setSelectedModel(model.id);
-                                    setShowModelSelector(false);
-                                    setModelSearch('');
-                                  }}
-                                  className="flex-1 text-left"
-                                >
-                                  <div className="flex items-center gap-2">
-                                    <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-                                    <span>{model.name}</span>
-                                  </div>
-                                  <span className="text-[9px] text-gray-500 ml-5">{model.provider}</span>
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    toggleFavoriteModel(model.id);
-                                  }}
-                                  className="p-1 hover:bg-gray-700 rounded"
-                                >
-                                  <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
-                                </button>
-                              </div>
-                            ))}
-                          <div className="border-b border-gray-800 my-1"></div>
-                        </>
-                      )}
-                      
-                      {/* All Models */}
-                      <div className="px-3 py-1 text-[9px] text-gray-500 uppercase font-semibold">
-                        {modelSearch ? 'Search Results' : (favoriteModels.length > 0 ? 'All Models' : 'Models')}
+            {/* Controls row */}
+            <div className="flex items-center gap-3 mt-2">
+              {/* Model Selector */}
+              {connectionMode === 'streaming' && (
+                <div className="relative" ref={modelSelectorRef}>
+                  <button
+                    onClick={() => {
+                      setShowModelSelector(!showModelSelector);
+                      if (!showModelSelector) setModelSearch('');
+                    }}
+                    className="text-[10px] px-2 py-1 rounded border bg-gray-800/50 border-gray-700 text-gray-400 hover:text-gray-300 hover:border-gray-600 transition-colors flex items-center gap-1.5"
+                  >
+                    <Cpu className="w-3 h-3" />
+                    {availableModels.find(m => m.id === selectedModel)?.name || selectedModel}
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                  
+                  {showModelSelector && (
+                    <div className="absolute bottom-full left-0 mb-1 bg-gray-900 border border-gray-700 rounded-lg shadow-xl z-50 min-w-[300px] max-h-[450px] flex flex-col">
+                      {/* Search Field */}
+                      <div className="p-2 border-b border-gray-800">
+                        <input
+                          type="text"
+                          placeholder="Search models..."
+                          value={modelSearch}
+                          onChange={(e) => setModelSearch(e.target.value)}
+                          className="w-full bg-gray-800 border border-gray-700 rounded px-3 py-1.5 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-violet-500"
+                          autoFocus
+                        />
                       </div>
-                      {availableModels
-                        .filter(m => {
+                      
+                      {/* Models List */}
+                      <div className="overflow-y-auto flex-1 py-1">
+                        {/* Favorites Section */}
+                        {favoriteModels.length > 0 && !modelSearch && (
+                          <>
+                            <div className="px-3 py-1 text-[9px] text-gray-500 uppercase font-semibold border-b border-gray-800">
+                              Favorites
+                            </div>
+                            {availableModels
+                              .filter(m => favoriteModels.includes(m.id))
+                              .map((model) => (
+                                <div
+                                  key={model.id}
+                                  className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 flex items-center justify-between ${
+                                    selectedModel === model.id ? 'text-violet-400 bg-gray-800/50' : 'text-gray-300'
+                                  }`}
+                                >
+                                  <button
+                                    onClick={() => {
+                                      setSelectedModel(model.id);
+                                      setShowModelSelector(false);
+                                      setModelSearch('');
+                                    }}
+                                    className="flex-1 text-left"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+                                      <span>{model.name}</span>
+                                    </div>
+                                    <span className="text-[9px] text-gray-500 ml-5">{model.provider}</span>
+                                  </button>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      toggleFavoriteModel(model.id);
+                                    }}
+                                    className="p-1 hover:bg-gray-700 rounded"
+                                  >
+                                    <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+                                  </button>
+                                </div>
+                              ))}
+                            <div className="border-b border-gray-800 my-1"></div>
+                          </>
+                        )}
+                        
+                        {/* All Models */}
+                        <div className="px-3 py-1 text-[9px] text-gray-500 uppercase font-semibold">
+                          {modelSearch ? 'Search Results' : (favoriteModels.length > 0 ? 'All Models' : 'Models')}
+                        </div>
+                        {availableModels
+                          .filter(m => {
+                            if (!modelSearch) return true;
+                            const search = modelSearch.toLowerCase();
+                            return m.name.toLowerCase().includes(search) || 
+                                   m.id.toLowerCase().includes(search) ||
+                                   m.provider.toLowerCase().includes(search);
+                          })
+                          .map((model) => (
+                            <div
+                              key={model.id}
+                              className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 flex items-center justify-between ${
+                                selectedModel === model.id ? 'text-violet-400 bg-gray-800/50' : 'text-gray-300'
+                              }`}
+                            >
+                              <button
+                                onClick={() => {
+                                  setSelectedModel(model.id);
+                                  setShowModelSelector(false);
+                                  setModelSearch('');
+                                }}
+                                className="flex-1 text-left"
+                              >
+                                <span>{model.name}</span>
+                                <span className="text-[9px] text-gray-500 ml-2">{model.provider}</span>
+                                {model.pricing && (
+                                  <span className="text-[9px] text-gray-600 ml-2">
+                                    ${model.pricing.prompt.toFixed(6)}/tok
+                                  </span>
+                                )}
+                              </button>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleFavoriteModel(model.id);
+                                }}
+                                className="p-1 hover:bg-gray-700 rounded"
+                                title={favoriteModels.includes(model.id) ? "Remove from favorites" : "Add to favorites"}
+                              >
+                                <Star className={`w-3 h-3 ${favoriteModels.includes(model.id) ? 'text-yellow-500 fill-yellow-500' : 'text-gray-600'}`} />
+                              </button>
+                            </div>
+                          ))}
+                        {availableModels.filter(m => {
                           if (!modelSearch) return true;
                           const search = modelSearch.toLowerCase();
                           return m.name.toLowerCase().includes(search) || 
                                  m.id.toLowerCase().includes(search) ||
                                  m.provider.toLowerCase().includes(search);
-                        })
-                        .map((model) => (
-                          <div
-                            key={model.id}
-                            className={`w-full text-left px-3 py-2 text-xs hover:bg-gray-800 flex items-center justify-between ${
-                              selectedModel === model.id ? 'text-violet-400 bg-gray-800/50' : 'text-gray-300'
-                            }`}
-                          >
-                            <button
-                              onClick={() => {
-                                setSelectedModel(model.id);
-                                setShowModelSelector(false);
-                                setModelSearch('');
-                              }}
-                              className="flex-1 text-left"
-                            >
-                              <span>{model.name}</span>
-                              <span className="text-[9px] text-gray-500 ml-2">{model.provider}</span>
-                              {model.pricing && (
-                                <span className="text-[9px] text-gray-600 ml-2">
-                                  ${model.pricing.prompt.toFixed(6)}/tok
-                                </span>
-                              )}
-                            </button>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                toggleFavoriteModel(model.id);
-                              }}
-                              className="p-1 hover:bg-gray-700 rounded"
-                              title={favoriteModels.includes(model.id) ? "Remove from favorites" : "Add to favorites"}
-                            >
-                              <Star className={`w-3 h-3 ${favoriteModels.includes(model.id) ? 'text-yellow-500 fill-yellow-500' : 'text-gray-600'}`} />
-                            </button>
+                        }).length === 0 && (
+                          <div className="px-3 py-4 text-xs text-gray-500 text-center">
+                            No models found
                           </div>
-                        ))}
-                      {availableModels.filter(m => {
-                        if (!modelSearch) return true;
-                        const search = modelSearch.toLowerCase();
-                        return m.name.toLowerCase().includes(search) || 
-                               m.id.toLowerCase().includes(search) ||
-                               m.provider.toLowerCase().includes(search);
-                      }).length === 0 && (
-                        <div className="px-3 py-4 text-xs text-gray-500 text-center">
-                          No models found
-                        </div>
-                      )}
+                        )}
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            )}
+                  )}
+                </div>
+              )}
+              
+              {/* Mode selector */}
+              <select 
+                value={connectionMode}
+                onChange={(e) => setConnectionMode(e.target.value as 'webrtc' | 'streaming' | 'noaudio')}
+                disabled={isConnected}
+                className="text-[10px] px-2 py-1 rounded border bg-gray-800/50 border-gray-700 text-gray-400 cursor-pointer disabled:opacity-50 focus:outline-none focus:border-violet-500"
+              >
+                <option value="webrtc">🎙️ Realtime</option>
+                <option value="streaming">💬 Streaming</option>
+                <option value="noaudio">⌨️ Text Only</option>
+              </select>
+              
+              {/* Status indicator */}
+              <span className={`text-[10px] px-2 py-0.5 rounded-full ${
+                isConnected 
+                  ? (isModelTalking ? 'bg-violet-950/50 text-violet-300 border border-violet-800/50' 
+                    : isRecording ? 'bg-red-950/50 text-red-300 border border-red-800/50'
+                    : 'bg-green-950/30 text-green-400 border border-green-800/30')
+                  : 'bg-gray-900 text-gray-500 border border-gray-800'
+              }`}>
+                {isConnected 
+                  ? (isModelTalking ? 'Speaking' 
+                    : isRecording ? 'Recording' 
+                    : connectionMode === 'webrtc' ? 'Live' : 'Ready')
+                  : 'Offline'}
+              </span>
+            </div>
           </div>
         </section>
 
