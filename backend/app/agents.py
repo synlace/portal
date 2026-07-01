@@ -257,3 +257,104 @@ async def run_agent_loop(job_id: str, description: str, mode: str = "standard"):
     finally:
         JOBS[job_id]["updated_at"] = datetime.utcnow().isoformat()
         _cleanup_cancel_event(job_id)
+
+
+# ─── Onboarding Agent ────────────────────────────────────────────────────────
+
+ONBOARDING_PROMPT = """You are portal's onboarding agent. Your job is to analyze the codebase at {workspace} and generate a concept graph + specs.
+
+ANALYSIS APPROACH:
+1. Read package.json, docker-compose.yml, requirements.txt, pyproject.toml for dependencies
+2. Read README.md for project description
+3. List directory structure to understand module organization (max depth: {max_depth})
+{src_only_note}
+4. Read key entry points (main.ts, app.py, index.js, main.py, etc.)
+5. Read config files for service definitions
+
+OUTPUT FORMAT — you MUST output a JSON object with this exact structure as your final response:
+
+```json
+{{
+  "graph": {{
+    "concepts": [
+      {{ "id": "concept-id", "label": "Concept Name", "parent": "parent-id-or-null", "x": 200, "y": 50 }}
+    ],
+    "specs": {{
+      "concept-id": ["spec-filename.md"]
+    }},
+    "relationships": [
+      {{ "from": "concept-a", "to": "concept-b", "label": "relationship" }}
+    ]
+  }},
+  "specs": [
+    {{
+      "filename": "concept-name.md",
+      "content": "# Concept Name\\n\\n## Overview\\n...\\n## Key Details\\n..."
+    }}
+  ]
+}}
+```
+
+RULES:
+- Generate 5-15 concepts (not too many, not too few)
+- Each concept should map to a real part of the codebase
+- Position nodes in a tree layout: root at top (y=50), children below (y=150, y=250, etc.)
+- Space nodes horizontally (x: 50-600 range)
+- Specs should be useful starting points with real content extracted from the code, not empty placeholders
+- Include overview, architecture, key decisions, and open questions in each spec
+- If the codebase is large, focus on the top-level architecture
+- The parent field should reference the parent concept's id, or null for root concepts
+- Output ONLY the JSON object, no other text"""
+
+
+async def spawn_onboarding_agent(
+    workspace: str,
+    scan_src_only: bool = False,
+    max_depth: int = 3,
+    generate_specs: bool = True,
+    include_readme: bool = True,
+) -> Dict[str, Any]:
+    """Run the onboarding agent synchronously and return the generated graph + specs."""
+    agent_model = os.environ.get("AGENT_MODEL", "xiaomi/mimo-v2.5")
+    agent_api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    agent_base_url = os.environ.get("AGENT_BASE_URL", "https://openrouter.ai/api/v1")
+
+    if not agent_api_key or agent_api_key in ("your_api_key", "your_api_key_here"):
+        return {"graph": {"concepts": [], "specs": {}, "relationships": []}, "specs": []}
+
+    src_only_note = "- Only scan the src/ or app/ directory (skip tests, node_modules, dist, __pycache__)" if scan_src_only else "- Scan all relevant directories"
+
+    prompt = ONBOARDING_PROMPT.format(
+        workspace=workspace,
+        max_depth=max_depth,
+        src_only_note=src_only_note,
+    )
+
+    model = OpenAIModel(
+        model_id=agent_model,
+        api_base=agent_base_url,
+        api_key=agent_api_key,
+    )
+
+    tools = get_agent_tools()
+    agent = ToolCallingAgent(
+        tools=tools,
+        model=model,
+        max_steps=20,
+        instructions=prompt,
+    )
+
+    try:
+        result = await asyncio.to_thread(agent.run, "Analyze the codebase and generate the concept graph and specs as JSON.")
+        # Try to parse JSON from the result
+        result_str = str(result)
+        # Find JSON object in the result
+        start = result_str.find("{")
+        end = result_str.rfind("}") + 1
+        if start != -1 and end > start:
+            parsed = json.loads(result_str[start:end])
+            return parsed
+    except Exception as e:
+        logger.error(f"Onboarding agent failed: {e}", exc_info=True)
+
+    return {"graph": {"concepts": [], "specs": {}, "relationships": []}, "specs": []}
